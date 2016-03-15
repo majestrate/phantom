@@ -7,7 +7,7 @@ static struct kad *kad = NULL;
 static void __attribute__((unused))
 dump_kad_node_info(struct kad_node_info *node)
 {
-	hexdump(node->id, SHA_DIGEST_LENGTH);
+	hexdump(node->id, CRYPTO_DIGEST_LENGTH);
 	printf("\nport: %hi,ip: %s\n", node->port, node->ip);
 }
 
@@ -43,7 +43,7 @@ distance(const uint8_t *id1, const uint8_t *id2, uint8_t *out)
 {
 	int i;
 	assert(id1 && id2 && out);
-	for (i = 0; i < SHA_DIGEST_LENGTH; i++) {
+	for (i = 0; i < CRYPTO_DIGEST_LENGTH; i++) {
 		out[i] = id1[i] ^ id2[i];
 	}
 }
@@ -62,7 +62,7 @@ bucket_idx(const uint8_t *id)
 	};
 	assert(kad);
 	assert(id);
-	for (i = 0; i < SHA_DIGEST_LENGTH; i++) {
+	for (i = 0; i < CRYPTO_DIGEST_LENGTH; i++) {
 		if (! (tmp = id[i] ^ kad->own_id[i])) {
 			continue;
 		}
@@ -71,7 +71,7 @@ bucket_idx(const uint8_t *id)
 		assert(r > -1 && r < NBUCKETS);
 		return r;
 	}
-	assert(!memcmp(id, kad->own_id, SHA_DIGEST_LENGTH));
+	assert(!memcmp(id, kad->own_id, CRYPTO_DIGEST_LENGTH));
 	return -1;
 }
 
@@ -223,7 +223,7 @@ update_worker(void)
 		assert(idx != -1);
 		pthread_mutex_lock(&kad->table->bucket_mutexes[idx]);
 		LIST_for_all(&kad->table->buckets[idx], help1, help2) {
-			if (! memcmp(node->id, help1->id, SHA_DIGEST_LENGTH)) {
+			if (! memcmp(node->id, help1->id, CRYPTO_DIGEST_LENGTH)) {
 				/* node already known */
 				free_kad_node_info(node);
 				LIST_remove(help1);
@@ -264,7 +264,7 @@ do_ping(struct kad_node_info *n)
 {
 	int ret;
 	struct ssl_connection *c;
-	uint8_t hash[SHA_DIGEST_LENGTH];
+	uint8_t hash[CRYPTO_DIGEST_LENGTH];
 	assert(n);
 	n->ponged = 0;
 	c = create_ssl_connection_tmout(n->ip, n->port, kad->config->communication_certificate, kad->config->private_communication_key, PING_TIMEOUT);
@@ -277,7 +277,7 @@ do_ping(struct kad_node_info *n)
 	if (ret != 0) {
 		return;
 	}
-	if (memcmp(hash, n->id, SHA_DIGEST_LENGTH)) {
+	if (memcmp(hash, n->id, CRYPTO_DIGEST_LENGTH)) {
 		return;
 	}
 	n->ponged = 1;
@@ -314,7 +314,7 @@ get_bucket_contents(struct kad_node_list *list, int idx, const uint8_t *except, 
 	assert(idx < NBUCKETS && idx > -1);
 	pthread_mutex_lock(&kad->table->bucket_mutexes[idx]);
 	LIST_for_all(&kad->table->buckets[idx], help1, help2) {
-		if (except && ! memcmp(help1->id, except, SHA_DIGEST_LENGTH)) {
+		if (except && ! memcmp(help1->id, except, CRYPTO_DIGEST_LENGTH)) {
 			continue;
 		}
 		node = kad_node_clone(help1);
@@ -388,22 +388,22 @@ static struct kad_node_info *
 find_closest_node(const uint8_t *key, uint8_t *out, const struct kad_node_list *l)
 {
 	struct kad_node_info *help1, *help2, *nret;
-	uint8_t dist[SHA_DIGEST_LENGTH];
+	uint8_t dist[CRYPTO_DIGEST_LENGTH];
 	int ret;
 	assert(key);
 	assert(l);
 	assert(l->nentries);
 	if (out) {
-		memcpy(out, l->list.next->id, SHA_DIGEST_LENGTH);
+		memcpy(out, l->list.next->id, CRYPTO_DIGEST_LENGTH);
 	}
 	nret = l->list.next;
 	LIST_for_all(&l->list, help1, help2) {
 		assert(help1->ip);
 		distance(key, help1->id, dist);
-		ret = memcmp(nret->id, dist, SHA_DIGEST_LENGTH);
+		ret = memcmp(nret->id, dist, CRYPTO_DIGEST_LENGTH);
 		if (ret > 0) { /* help1 is closer than previous closest */
 			if (out) {
-				memcpy(out, help1->id, SHA_DIGEST_LENGTH);
+				memcpy(out, help1->id, CRYPTO_DIGEST_LENGTH);
 			}
 			nret = help1;
 		}
@@ -413,7 +413,7 @@ find_closest_node(const uint8_t *key, uint8_t *out, const struct kad_node_list *
 }
 
 struct poll_worker_data {
-	uint8_t id[SHA_DIGEST_LENGTH];
+	uint8_t id[CRYPTO_DIGEST_LENGTH];
 	struct kad_node_info *n;
 	struct rpc_return *ret;
 };
@@ -450,7 +450,7 @@ random_id_for_bucket(int idx, uint8_t *buf)
 	int i;
 	assert(buf);
 	assert(idx > -1 && idx < NBUCKETS);
-	rand_bytes(buf, SHA_DIGEST_LENGTH);
+	rand_bytes(buf, CRYPTO_DIGEST_LENGTH);
 	for (i = 0; i < (NBUCKETS - idx - 1) / 8; i++) {
 		buf[i] = kad->own_id[i];
 	}
@@ -475,7 +475,7 @@ update_lists(struct kad_node_list *polled, struct kad_node_list *unpolled, struc
 		LIST_insert(failed, pwd->n);
 		LIST_for_all(failed, help1, help2) {
 			LIST_for_all(&unpolled->list, help3, help4) {
-				if (! memcmp(help1->id, help3->id, SHA_DIGEST_LENGTH)) {
+				if (! memcmp(help1->id, help3->id, CRYPTO_DIGEST_LENGTH)) {
 					LIST_remove(help3);
 					free_kad_node_info(help3);
 					unpolled->nentries--;
@@ -489,7 +489,7 @@ update_lists(struct kad_node_list *polled, struct kad_node_list *unpolled, struc
 	polled->nentries++;
 	LIST_for_all(&polled->list, help1, help2) {
 		LIST_for_all(&unpolled->list, help3, help4) {
-			if (! memcmp(help1->id, help3->id, SHA_DIGEST_LENGTH)) {
+			if (! memcmp(help1->id, help3->id, CRYPTO_DIGEST_LENGTH)) {
 				LIST_remove(help3);
 				free_kad_node_info(help3);
 				unpolled->nentries--;
@@ -500,18 +500,18 @@ update_lists(struct kad_node_list *polled, struct kad_node_list *unpolled, struc
 	/* skip copies of our own node or already polled/failed nodes and do not add nodes to unpolled twice */
 	for (i = 0; i < pwd->ret->nnodes; i++) {
 		skip = 0;
-		if (! memcmp(pwd->ret->nodes[i]->id, kad->own_id, SHA_DIGEST_LENGTH)) {
+		if (! memcmp(pwd->ret->nodes[i]->id, kad->own_id, CRYPTO_DIGEST_LENGTH)) {
 			skip = 1;
 		} else {
 			LIST_for_all(failed, help1, help2) {
-				if (! memcmp(help1->id, pwd->ret->nodes[i]->id, SHA_DIGEST_LENGTH)) {
+				if (! memcmp(help1->id, pwd->ret->nodes[i]->id, CRYPTO_DIGEST_LENGTH)) {
 					skip = 1;
 					break;
 				}
 			}
 			if (! skip) {
 				LIST_for_all(&polled->list, help1, help2) {
-					if (! memcmp(help1->id, pwd->ret->nodes[i]->id, SHA_DIGEST_LENGTH)) {
+					if (! memcmp(help1->id, pwd->ret->nodes[i]->id, CRYPTO_DIGEST_LENGTH)) {
 						skip = 1;
 						break;
 					}
@@ -519,7 +519,7 @@ update_lists(struct kad_node_list *polled, struct kad_node_list *unpolled, struc
 			}
 			if (!skip) {
 				LIST_for_all(&unpolled->list, help1, help2) {
-					if (! memcmp(help1->id, pwd->ret->nodes[i]->id, SHA_DIGEST_LENGTH)) {
+					if (! memcmp(help1->id, pwd->ret->nodes[i]->id, CRYPTO_DIGEST_LENGTH)) {
 						skip = 1;
 						break;
 					}
@@ -541,10 +541,10 @@ update_lists(struct kad_node_list *polled, struct kad_node_list *unpolled, struc
 static int
 cmp_distance(const uint8_t *a, const uint8_t *b, const uint8_t *key)
 {
-	uint8_t to_a[SHA_DIGEST_LENGTH], to_b[SHA_DIGEST_LENGTH];
+	uint8_t to_a[CRYPTO_DIGEST_LENGTH], to_b[CRYPTO_DIGEST_LENGTH];
 	distance(a, key, to_a);
 	distance(b, key, to_b);
-	return memcmp(to_a, to_b, SHA_DIGEST_LENGTH);
+	return memcmp(to_a, to_b, CRYPTO_DIGEST_LENGTH);
 }
 
 static struct kad_node_info *
@@ -632,7 +632,7 @@ iterative_find(const uint8_t *id, uint8_t **data, size_t *len, int wantvalue)
 	int alpha, i, ret, got_it;
 	struct poll_worker_data pwds[KADEMLIA_ALPHA];
 	pthread_t tids[KADEMLIA_ALPHA];
-	uint8_t closest_node[SHA_DIGEST_LENGTH];
+	uint8_t closest_node[CRYPTO_DIGEST_LENGTH];
 	assert(id);
 	if (wantvalue) {
 		assert(data);
@@ -651,7 +651,7 @@ iterative_find(const uint8_t *id, uint8_t **data, size_t *len, int wantvalue)
 	assert(unpolled->nentries);
 	find_closest_node(id, closest_node, unpolled);
 	for (i = 0; i < KADEMLIA_ALPHA; i++) {
-		memcpy(pwds[i].id, id, SHA_DIGEST_LENGTH);
+		memcpy(pwds[i].id, id, CRYPTO_DIGEST_LENGTH);
 	}
 	got_it = 0;
 	while (polled->nentries < KADEMLIA_K && unpolled->nentries) {
@@ -666,7 +666,7 @@ iterative_find(const uint8_t *id, uint8_t **data, size_t *len, int wantvalue)
 			assert(help1);
 			unpolled->nentries--;
 			pwds[i].n = help1;
-			assert(memcmp(help1->id, kad->own_id, SHA_DIGEST_LENGTH));
+			assert(memcmp(help1->id, kad->own_id, CRYPTO_DIGEST_LENGTH));
 			if (wantvalue) {
 				ret = pthread_create(&tids[i], NULL, (void *(*)(void *)) poll_find_value_worker, &pwds[i]);
 			} else {
@@ -735,7 +735,7 @@ house_keeping_worker(void)
 {
 	struct timespec t;
 	int ret, i;
-	uint8_t id[SHA_DIGEST_LENGTH];
+	uint8_t id[CRYPTO_DIGEST_LENGTH];
 	while (1) {
 		poll(NULL, 0, 1000 * HOUSE_KEEPING_TIMEOUT);
 		if (kad->quit) {
@@ -847,7 +847,7 @@ start_kad(const struct config *config)
 	node_info__init(&kad->self);
 	kad->self.ip = config->ip;
 	kad->self.port = config->port;
-	kad->self.id.len = SHA_DIGEST_LENGTH;
+	kad->self.id.len = CRYPTO_DIGEST_LENGTH;
 	kad->self.id.data = kad->own_id;
 	kad->self.cert.data = config->communication_certificate_flat->data;
 	kad->self.cert.len = config->communication_certificate_flat->len;
@@ -944,7 +944,7 @@ new_kad_node_info(const uint8_t *id, const char *ip, uint16_t port, X509 *cert, 
 	if (n == NULL) {
 		return NULL;
 	}
-	memcpy(n->id, id, SHA_DIGEST_LENGTH);
+	memcpy(n->id, id, CRYPTO_DIGEST_LENGTH);
 	n->ip = strdup(ip);
 	if (n->ip == NULL) {
 		free(n);
@@ -996,8 +996,8 @@ update_table_relay(const struct kad_node_info *n)
 {
 	struct kad_node_info *node;
 	assert(n);
-	/*assert(memcmp(n->id, kad->own_id, SHA_DIGEST_LENGTH));*/
-	if (! memcmp(n->id, kad->own_id, SHA_DIGEST_LENGTH)) {
+	/*assert(memcmp(n->id, kad->own_id, CRYPTO_DIGEST_LENGTH));*/
+	if (! memcmp(n->id, kad->own_id, CRYPTO_DIGEST_LENGTH)) {
 		printf("id collission\n");
 		return;
 	}

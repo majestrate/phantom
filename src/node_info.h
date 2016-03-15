@@ -4,7 +4,6 @@
 #include <openssl/x509.h>
 #include <openssl/rsa.h>
 #include <openssl/evp.h>
-#include <openssl/sha.h>
 #include <stdint.h>
 #include "x509_flat.h"
 

@@ -1,9 +1,12 @@
 #ifndef __HAVE_TUNNEL_H__
 #define __HAVE_TUNNEL_H__
 
-/*2 ip v6 adresses in binary form + 2 x 32 bit (rest is padding for blocksize) */
-/* or SHA_DIGEST_LENGTH + 1 ipv6 adress in binary form */
-#define TUNNEL_BLOCK_SIZE 48
+#include "hash.h"
+
+/* 80 bytes */
+/* CRYPTO_DIGEST_LENGTH + 1 ipv6 adress in binary form */
+/* or 2 ip v6 adresses in binary form + 2 x 32 bit (rest is padding for blocksize) */
+#define TUNNEL_BLOCK_SIZE (CRYPTO_DIGEST_LENGTH + 16)
 
 #include "server.h"
 #include "path.h"

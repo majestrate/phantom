@@ -86,9 +86,9 @@ create_tunnel_init_reply_package(const uint8_t *keys, const uint8_t *ivs, int nk
 	EVP_CIPHER_CTX ctx;
 	uint8_t outbuf[TUNNEL_BLOCK_SIZE];
 	uint8_t *out, *in, *tmp;
-	assert(len <= TUNNEL_BLOCK_SIZE - SHA_DIGEST_LENGTH);
+	assert(len <= TUNNEL_BLOCK_SIZE - CRYPTO_DIGEST_LENGTH);
 	memcpy(buf, contents, len);
-	SHA1(buf, TUNNEL_BLOCK_SIZE - SHA_DIGEST_LENGTH, buf + (TUNNEL_BLOCK_SIZE - SHA_DIGEST_LENGTH));
+	cryptohash(buf, TUNNEL_BLOCK_SIZE - CRYPTO_DIGEST_LENGTH, buf + (TUNNEL_BLOCK_SIZE - CRYPTO_DIGEST_LENGTH));
 	in = buf;
 	out = outbuf;
 	for (i = 0; i < nkeys; i++) {
@@ -131,9 +131,9 @@ create_entry_tunnel_init_reply_package(const uint8_t *keys, const uint8_t *ivs, 
 int
 extract_entry_init_reply_package(const uint8_t *received, uint32_t *flags)
 {
-	uint8_t hash[SHA_DIGEST_LENGTH];
-	SHA1(received, TUNNEL_BLOCK_SIZE - SHA_DIGEST_LENGTH, hash);
-	if (memcmp(received + (TUNNEL_BLOCK_SIZE - SHA_DIGEST_LENGTH), hash, SHA_DIGEST_LENGTH)) {
+	uint8_t hash[CRYPTO_DIGEST_LENGTH];
+	cryptohash(received, TUNNEL_BLOCK_SIZE - CRYPTO_DIGEST_LENGTH, hash);
+	if (memcmp(received + (TUNNEL_BLOCK_SIZE - CRYPTO_DIGEST_LENGTH), hash, CRYPTO_DIGEST_LENGTH)) {
 		return -1;
 	}
 	*flags = deserialize_32_t(received);
@@ -143,10 +143,10 @@ extract_entry_init_reply_package(const uint8_t *received, uint32_t *flags)
 int
 extract_exit_init_reply_package(const uint8_t *received, struct in6_addr *ap)
 {
-	uint8_t hash[SHA_DIGEST_LENGTH];
+	uint8_t hash[CRYPTO_DIGEST_LENGTH];
 	assert(sizeof (ap->s6_addr) == 16);
-	SHA1(received, TUNNEL_BLOCK_SIZE - SHA_DIGEST_LENGTH, hash);
-	if (memcmp(received + (TUNNEL_BLOCK_SIZE - SHA_DIGEST_LENGTH), hash, SHA_DIGEST_LENGTH)) {
+	cryptohash(received, TUNNEL_BLOCK_SIZE - CRYPTO_DIGEST_LENGTH, hash);
+	if (memcmp(received + (TUNNEL_BLOCK_SIZE - CRYPTO_DIGEST_LENGTH), hash, CRYPTO_DIGEST_LENGTH)) {
 		return -1;
 	}
 	memcpy(ap->s6_addr, received, 16);
@@ -259,14 +259,14 @@ await_entry_tunnel(const struct in6_addr *own_ap, struct in6_addr *remote_ip, co
 		free(keys);
 		return NULL;
 	}
-	serialize_32_t(2 * TUNNEL_BLOCK_SIZE + SHA_DIGEST_LENGTH, ipbuf);
+	serialize_32_t(2 * TUNNEL_BLOCK_SIZE + CRYPTO_DIGEST_LENGTH, ipbuf);
 	ret = ssl_write(tunnel_conn->ssl, ipbuf, 4);
 	if (ret != 0) {
 		free_ssl_connection(tunnel_conn);
 		free(keys);
 		return NULL;
 	}
-	ret = ssl_write(tunnel_conn->ssl, path->peer_id, SHA_DIGEST_LENGTH);
+	ret = ssl_write(tunnel_conn->ssl, path->peer_id, CRYPTO_DIGEST_LENGTH);
 	if (ret != 0) {
 		free_ssl_connection(tunnel_conn);
 		free(keys);
@@ -332,11 +332,11 @@ create_tunnel(struct in6_addr *ap, const struct path *path)
 		free_awaited_connection(aw);
 		return NULL;
 	}
-	if (memcmp(aw->incoming_package + SHA_DIGEST_LENGTH, init_package, TUNNEL_BLOCK_SIZE)) {
+	if (memcmp(aw->incoming_package + CRYPTO_DIGEST_LENGTH, init_package, TUNNEL_BLOCK_SIZE)) {
 		free_awaited_connection(aw);
 		return NULL;
 	}
-	keys = brute_force(aw->incoming_package + SHA_DIGEST_LENGTH + TUNNEL_BLOCK_SIZE, path->xkeys, path->nkeys, exit_check_function, 1);
+	keys = brute_force(aw->incoming_package + CRYPTO_DIGEST_LENGTH + TUNNEL_BLOCK_SIZE, path->xkeys, path->nkeys, exit_check_function, 1);
 	if (keys == NULL) {
 		free_awaited_connection(aw);
 		return NULL;

@@ -1,15 +1,16 @@
 #include "diskcache.h"
+#include "hash.h"
 
 static char *
 filename(const struct disk_cache *d, const uint8_t *key)
 {
 	int ret;
 	char *name, *buf;
-	name = bin_to_hex(key, SHA_DIGEST_LENGTH);
+	name = bin_to_hex(key, CRYPTO_DIGEST_LENGTH);
 	if (name == NULL) {
 		return NULL;
 	}
-	buf = malloc(d->len + 2 * SHA_DIGEST_LENGTH + 10); /* enough */
+	buf = malloc(d->len + 2 * CRYPTO_DIGEST_LENGTH + 10); /* enough */
 	if (buf == NULL) {
 		free(name);
 		return NULL;

@@ -10,6 +10,7 @@
 
 #include "helper.h"
 #include "x509_flat.h"
+#include "hash.h"
 
 X509 *
 read_x509_from_x509_flat(const struct X509_flat *fx)
@@ -288,7 +289,7 @@ X509_hash(X509 *c, uint8_t *buf)
 	if (f == NULL) {
 		return -1;
 	}
-	SHA1(f->data, f->len, buf);
+	cryptohash(f->data, f->len, buf);
 	free_X509_flat(f);
 
 	return 0;

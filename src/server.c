@@ -28,7 +28,7 @@ register_wait_connection_inner(const char *ip, const uint8_t *id, int permanent)
 			return NULL;
 		}
 	}
-	memcpy(c->id, id, SHA_DIGEST_LENGTH);
+	memcpy(c->id, id, CRYPTO_DIGEST_LENGTH);
 	ret = sem_init(&c->sem, 0, 0);
 	if (ret != 0) {
 		free(c->ip);
@@ -113,7 +113,7 @@ send_ap_connection_request(const struct in6_addr *ap)
 	struct ssl_connection *out;
 	char **ip_adresses;
 	uint16_t *ports;
-	uint8_t hash[SHA_DIGEST_LENGTH];
+	uint8_t hash[CRYPTO_DIGEST_LENGTH];
 	ret = get_entry_nodes_for_ap_adress(&ip_adresses, &ports, &num, ap);
 	if (ret != 0) {
 		return NULL;
@@ -130,8 +130,8 @@ send_ap_connection_request(const struct in6_addr *ap)
 	if (out == NULL) {
 		return NULL;
 	}
-	SHA1(ap->s6_addr, sizeof (ap->s6_addr), hash);
-	ret = write_package(out->ssl, hash, SHA_DIGEST_LENGTH);
+	cryptohash(ap->s6_addr, sizeof (ap->s6_addr), hash);
+	ret = write_package(out->ssl, hash, CRYPTO_DIGEST_LENGTH);
 	if (ret != 0) {
 		free_ssl_connection(out);
 		return NULL;
@@ -254,7 +254,7 @@ handle_first_package(const struct worker_data *wd, const uint8_t *package, uint3
 		free_conn_ctx(conn);
 		return NULL;
 	}
-	next = handle_first_round_setup_array(server.config, package + SHA_DIGEST_LENGTH, len - SHA_DIGEST_LENGTH, package, from_ip, conn, &outsize);
+	next = handle_first_round_setup_array(server.config, package + CRYPTO_DIGEST_LENGTH, len - CRYPTO_DIGEST_LENGTH, package, from_ip, conn, &outsize);
 	free(from_ip);
 	if (next == NULL) {
 		free_conn_ctx(conn);
@@ -291,7 +291,7 @@ handle_snd_package(uint8_t *package, uint32_t len, const struct conn_ctx *old, s
 	if (new == NULL) {
 		return NULL;
 	}
-	next = handle_second_round_setup_array(server.config, package + SHA_DIGEST_LENGTH, len - SHA_DIGEST_LENGTH, package, old, new, &outsize);
+	next = handle_second_round_setup_array(server.config, package + CRYPTO_DIGEST_LENGTH, len - CRYPTO_DIGEST_LENGTH, package, old, new, &outsize);
 	if (next == NULL) {
 		free_conn_ctx(new);
 		return NULL;
@@ -329,12 +329,12 @@ pass_x_package_on(struct conn_ctx *conn)
 	if (! X509_compare(conn->next_communication_certificate, conn->to_next->peer_cert)) {
 		return -1;
 	}
-	serialize_32_t(SHA_DIGEST_LENGTH, buf);
+	serialize_32_t(CRYPTO_DIGEST_LENGTH, buf);
 	ret = ssl_write(conn->to_next->ssl, buf, 4);
 	if (ret != 0) {
 		return -1;
 	}
-	ret = ssl_write(conn->to_next->ssl, conn->next_id, SHA_DIGEST_LENGTH);
+	ret = ssl_write(conn->to_next->ssl, conn->next_id, CRYPTO_DIGEST_LENGTH);
 	if (ret != 0) {
 		return -1;
 	}
@@ -430,7 +430,8 @@ exit_worker(struct exit_worker *ew)
 		return -1;
 	}
 	ip = ip4_to_char(sa.sin_addr.s_addr);
-	tunnel_conn = create_ssl_connection(ip, /*htons(sa.sin_port) XXX */8080, server.certificate, server.privkey);
+  /* TODO: make port configurable */
+	tunnel_conn = create_ssl_connection(ip, /* htons(sa.sin_port) */ 11234, server.certificate, server.privkey);
 	free(ip);
 	if (tunnel_conn == NULL) {
 		free_exit_worker(ew);
@@ -440,13 +441,13 @@ exit_worker(struct exit_worker *ew)
 		free_exit_worker(ew);
 		return -1;
 	}
-	serialize_32_t(2 * TUNNEL_BLOCK_SIZE + SHA_DIGEST_LENGTH, buf);
+	serialize_32_t(2 * TUNNEL_BLOCK_SIZE + CRYPTO_DIGEST_LENGTH, buf);
 	ret = ssl_write(tunnel_conn->ssl, buf, 4);
 	if (ret != 0) {
 		free_exit_worker(ew);
 		return -1;
 	}
-	ret = ssl_write(tunnel_conn->ssl, ew->conn->peer_id, SHA_DIGEST_LENGTH);
+	ret = ssl_write(tunnel_conn->ssl, ew->conn->peer_id, CRYPTO_DIGEST_LENGTH);
 	if (ret != 0) {
 		free_exit_worker(ew);
 		return -1;
@@ -587,7 +588,7 @@ entry_worker(struct entry_worker *ew)
 	EVP_CIPHER_CTX_init(&ctx);
 	EVP_DecryptInit(&ctx, EVP_aes_256_cbc(), dp->key, dp->iv);
 	EVP_CIPHER_CTX_set_padding(&ctx, 0);
-	EVP_DecryptUpdate(&ctx, cki_received, &written, aw->incoming_package + SHA_DIGEST_LENGTH, TUNNEL_BLOCK_SIZE);
+	EVP_DecryptUpdate(&ctx, cki_received, &written, aw->incoming_package + CRYPTO_DIGEST_LENGTH, TUNNEL_BLOCK_SIZE);
 	EVP_DecryptFinal(&ctx, cki_received + written, &written2);
 	assert(written + written2 == TUNNEL_BLOCK_SIZE);
 	if (memcmp(crypto_key_init_block, cki_received, TUNNEL_BLOCK_SIZE)) {
@@ -599,7 +600,7 @@ entry_worker(struct entry_worker *ew)
 	EVP_CIPHER_CTX_init(&ctx);
 	EVP_DecryptInit(&ctx, EVP_aes_256_cbc(), dp->key, dp->iv);
 	EVP_CIPHER_CTX_set_padding(&ctx, 0);
-	EVP_DecryptUpdate(&ctx, cki_received, &written, aw->incoming_package + SHA_DIGEST_LENGTH + TUNNEL_BLOCK_SIZE, TUNNEL_BLOCK_SIZE);
+	EVP_DecryptUpdate(&ctx, cki_received, &written, aw->incoming_package + CRYPTO_DIGEST_LENGTH + TUNNEL_BLOCK_SIZE, TUNNEL_BLOCK_SIZE);
 	EVP_DecryptFinal(&ctx, cki_received + written, &written2);
 	assert(written + written2 == TUNNEL_BLOCK_SIZE);
 	EVP_CIPHER_CTX_cleanup(&ctx);
@@ -640,13 +641,13 @@ become_tx_node(const struct ssl_connection *peer, struct conn_ctx *conn)
 	struct worker_pid *new;
 	struct awaited_connection *aw;
 	if (conn->flags & ENTRY_NODE) {
-		uint8_t hash[SHA_DIGEST_LENGTH];
+		uint8_t hash[CRYPTO_DIGEST_LENGTH];
 		/* FIXME */
 		ret = update_routing_table_entry(&conn->ap, &conn->rte, server.port, NULL /**routing_certificate*/);
 		if (ret != 0) {
 			return -1;
 		}
-		SHA1(conn->ap.s6_addr, sizeof (conn->ap.s6_addr), hash);
+		cryptohash(conn->ap.s6_addr, sizeof (conn->ap.s6_addr), hash);
 		aw = register_wait_connection_permanent(NULL, hash);
 		if (aw == NULL) {
 			return -1;
@@ -798,7 +799,7 @@ tunnel_worker(struct tunnel_worker *tw)
 		free_tunnel_worker(tw);
 		return -1;
 	}
-	dummy_package = decrypt_tunnel_block(tw->dp, tw->aw->incoming_package + SHA_DIGEST_LENGTH);
+	dummy_package = decrypt_tunnel_block(tw->dp, tw->aw->incoming_package + CRYPTO_DIGEST_LENGTH);
 	if (dummy_package == NULL) {
 		free_tunnel_worker(tw);
 		return -1;
@@ -809,7 +810,7 @@ tunnel_worker(struct tunnel_worker *tw)
 		return -1;
 	}
 	free(dummy_package);
-	init_package = decrypt_tunnel_block(tw->dp, tw->aw->incoming_package + TUNNEL_BLOCK_SIZE + SHA_DIGEST_LENGTH);
+	init_package = decrypt_tunnel_block(tw->dp, tw->aw->incoming_package + TUNNEL_BLOCK_SIZE + CRYPTO_DIGEST_LENGTH);
 	if (init_package == NULL) {
 		free_tunnel_worker(tw);
 		return -1;
@@ -821,7 +822,7 @@ tunnel_worker(struct tunnel_worker *tw)
 		return -1;
 	}
 	ip = ip4_to_char(sa.sin_addr.s_addr);
-	tunnel_conn = create_ssl_connection(ip, /*htons(sa.sin_port)*/ 8080, server.certificate, server.privkey);
+	tunnel_conn = create_ssl_connection(ip, /*htons(sa.sin_port)*/ 11234, server.certificate, server.privkey);
 	free(ip);
 	if (tunnel_conn == NULL) {
 		free(init_package);
@@ -833,7 +834,7 @@ tunnel_worker(struct tunnel_worker *tw)
 		free_tunnel_worker(tw);
 		return -1;
 	}
-	serialize_32_t(2 * TUNNEL_BLOCK_SIZE + SHA_DIGEST_LENGTH, buf);
+	serialize_32_t(2 * TUNNEL_BLOCK_SIZE + CRYPTO_DIGEST_LENGTH, buf);
 	ret = ssl_write(tunnel_conn->ssl, buf, 4);
 	if (ret != 0) {
 		free_ssl_connection(tunnel_conn);
@@ -841,7 +842,7 @@ tunnel_worker(struct tunnel_worker *tw)
 		free_tunnel_worker(tw);
 		return -1;
 	}
-	ret = ssl_write(tunnel_conn->ssl, tw->peer_id, SHA_DIGEST_LENGTH);
+	ret = ssl_write(tunnel_conn->ssl, tw->peer_id, CRYPTO_DIGEST_LENGTH);
 	if (ret != 0) {
 		free_ssl_connection(tunnel_conn);
 		free(init_package);
@@ -939,7 +940,7 @@ static int
 become_x_node(struct conn_ctx *conn, struct awaited_connection *x_conn)
 {
 	int ret;
-	uint8_t zero[SHA_DIGEST_LENGTH];
+	uint8_t zero[CRYPTO_DIGEST_LENGTH];
 	struct wfti_data one, two;
 	struct awaited_connection *aw;
 	struct tunnel_worker *tw;
@@ -957,8 +958,8 @@ become_x_node(struct conn_ctx *conn, struct awaited_connection *x_conn)
 	}
 	/* terminating x node */
 	if (conn->flags & T_NODE) {
-		bzero(zero, SHA_DIGEST_LENGTH);
-		if (strcmp(conn->next_ip, "") && memcmp(conn->next_id, zero, SHA_DIGEST_LENGTH)) {
+		bzero(zero, CRYPTO_DIGEST_LENGTH);
+		if (strcmp(conn->next_ip, "") && memcmp(conn->next_id, zero, CRYPTO_DIGEST_LENGTH)) {
 			ret = pass_x_package_on(conn);
 			if (ret != 0) {
 				printf("passing a x package on has failed\n");
@@ -1148,7 +1149,7 @@ worker(struct worker_data *wd)
 			return 0;
 		} /* not a kademlia package */
 	}
-	if (outsize < SHA_DIGEST_LENGTH) {
+	if (outsize < CRYPTO_DIGEST_LENGTH) {
 		free(package);
 		SSL_free(ssl);
 		free_worker_data(wd);
@@ -1164,7 +1165,7 @@ worker(struct worker_data *wd)
 	}
 	pthread_mutex_lock(&server.awaited_mutex);
 	LIST_for_all(&server.awaited_list, help1, help2) {
-		if (!memcmp(help1->id, package, SHA_DIGEST_LENGTH)) {
+		if (!memcmp(help1->id, package, CRYPTO_DIGEST_LENGTH)) {
 			if (help1->ip == NULL || !strcmp(help1->ip, ip)) {
 				if (help1->permanent) {
 					sem_wait(&help1->entry_ok);
@@ -1208,7 +1209,7 @@ worker(struct worker_data *wd)
 		SSL_free(ssl);
 		return -1;
 	}
-	if (outsize < SHA_DIGEST_LENGTH) {
+	if (outsize < CRYPTO_DIGEST_LENGTH) {
 		free_conn_ctx(fst);
 		SSL_free(ssl);
 		free_worker_data(wd);

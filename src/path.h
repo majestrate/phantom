@@ -10,7 +10,6 @@
 #include <openssl/ssl.h>
 #include <openssl/rsa.h>
 #include <openssl/aes.h>
-#include <openssl/sha.h>
 #include <openssl/buffer.h>
 #include <openssl/engine.h>
 #include <openssl/evp.h>
@@ -24,6 +23,7 @@
 #include "rc4rand.h"
 #include "setuppackage.pb-c.h"
 #include "cleanup_stack.h"
+#include "hash.h"
 
 #define MAX_DUMMIES 3
 #define MIN_DUMMIES 1
@@ -37,9 +37,9 @@ struct dummy_package {
 };
 
 struct setup_package {
-	uint8_t prev_id[SHA_DIGEST_LENGTH];
-	uint8_t old_prev_id[SHA_DIGEST_LENGTH];
-	uint8_t next_id[SHA_DIGEST_LENGTH];
+	uint8_t prev_id[CRYPTO_DIGEST_LENGTH];
+	uint8_t old_prev_id[CRYPTO_DIGEST_LENGTH];
+	uint8_t next_id[CRYPTO_DIGEST_LENGTH];
 	char *prev_ip;
 	char *next_ip;
 	struct X509_flat *prev_communication_certificate_flat;
@@ -66,7 +66,7 @@ struct setup_path {
 	struct setup_package *sps;
 	int construction_certificate_len;
 	uint8_t *construction_certificate_data;
-	uint8_t endhash[SHA_DIGEST_LENGTH];
+	uint8_t endhash[CRYPTO_DIGEST_LENGTH];
 	uint32_t entrypath;
 	struct ssl_connection *ssl_conn;
 	/* is_reverse_path == 1 if we start with many y nodes */
@@ -85,7 +85,7 @@ struct path {
 	struct in6_addr ap;
 	struct xkeys **xkeys;
 	struct ssl_connection *conn;
-	uint8_t peer_id[SHA_DIGEST_LENGTH];
+	uint8_t peer_id[CRYPTO_DIGEST_LENGTH];
 	char *peer_ip;
 	uint16_t peer_port;
 };

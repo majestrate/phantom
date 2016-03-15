@@ -4,6 +4,7 @@
 #include <openssl/rsa.h>
 #include <openssl/x509.h>
 #include <inttypes.h>
+#include "hash.h"
 #include "config.h"
 #include "helper.h"
 
@@ -19,8 +20,8 @@ struct rte {
 };
 
 struct conn_ctx {
-	uint8_t prev_id[SHA_DIGEST_LENGTH];
-	uint8_t next_id[SHA_DIGEST_LENGTH];
+	uint8_t prev_id[CRYPTO_DIGEST_LENGTH];
+	uint8_t next_id[CRYPTO_DIGEST_LENGTH];
 	char *prev_ip;
 	char *next_ip;
 	uint16_t prev_port;

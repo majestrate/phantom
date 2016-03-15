@@ -1,4 +1,5 @@
 #include "netdb.h"
+#include "hash.h"
 #include "tunnel.h"
 
 static int

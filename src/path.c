@@ -1,5 +1,6 @@
 #include "path.h"
 #include "server.h"
+#include "kdf.h"
 
 static int
 add_routing_table_entry(SetupPackage *s, struct in6_addr *ap_adress, char *const *ips, int nips)
@@ -69,11 +70,13 @@ generate_conn_keys(int nkeys, const uint8_t *basekey, const uint8_t *salt)
 	cleanup_stack_push(free, keys->keys);
 	memcpy(tmp, basekey, SYMMETRIC_CIPHER_KEY_LEN);
 	for (i = 0; i < nkeys; i++) {
-		PKCS5_PBKDF2_HMAC_SHA1((char *) tmp, SYMMETRIC_CIPHER_KEY_LEN, salt, SYMMETRIC_CIPHER_KEY_LEN, PBKDF2_STEPS, SYMMETRIC_CIPHER_KEY_LEN, keys->keys + SYMMETRIC_CIPHER_KEY_LEN * i);
+		/* PKCS5_PBKDF2_HMAC_SHA1((char *) tmp, SYMMETRIC_CIPHER_KEY_LEN, salt, SYMMETRIC_CIPHER_KEY_LEN, PBKDF2_STEPS, SYMMETRIC_CIPHER_KEY_LEN, keys->keys + SYMMETRIC_CIPHER_KEY_LEN * i); */
+    kdf((char*) tmp, SYMMETRIC_CIPHER_KEY_LEN, salt, SYMMETRIC_CIPHER_KEY_LEN, KDF_STEPS, SYMMETRIC_CIPHER_KEY_LEN, keys->keys + SYMMETRIC_CIPHER_KEY_LEN * i);
 		memcpy(tmp, keys->keys + SYMMETRIC_CIPHER_KEY_LEN * i, SYMMETRIC_CIPHER_KEY_LEN);
 	}
 	for (i = 0; i < nkeys; i++) {
-		PKCS5_PBKDF2_HMAC_SHA1((char *) tmp, SYMMETRIC_CIPHER_IV_LEN, salt, SYMMETRIC_CIPHER_IV_LEN, PBKDF2_STEPS, SYMMETRIC_CIPHER_IV_LEN, keys->ivs + SYMMETRIC_CIPHER_IV_LEN * i);
+		/* PKCS5_PBKDF2_HMAC_SHA1((char *) tmp, SYMMETRIC_CIPHER_IV_LEN, salt, SYMMETRIC_CIPHER_IV_LEN, PBKDF2_STEPS, SYMMETRIC_CIPHER_IV_LEN, keys->ivs + SYMMETRIC_CIPHER_IV_LEN * i); */
+    kdf((char*) tmp, SYMMETRIC_CIPHER_IV_LEN, salt, SYMMETRIC_CIPHER_IV_LEN, KDF_STEPS, SYMMETRIC_CIPHER_IV_LEN, keys->keys + SYMMETRIC_CIPHER_IV_LEN * i);
 		memcpy(tmp, keys->ivs + SYMMETRIC_CIPHER_IV_LEN * i, SYMMETRIC_CIPHER_IV_LEN);
 	}
 	/* keep allocs in case of success */
@@ -134,7 +137,7 @@ delete_struct_setup_path2(struct setup_path *path, int save_conn)
 		delete_nodes(path->nodes, path->nnodes);
 	}
 	if (path->construction_certificate != NULL) {
-		RSA_free(path->construction_certificate);
+    RSA_free(path->construction_certificate); /* XXX: NTRU goes here */
 	}
 	if (path->sizes != NULL) {
 		free(path->sizes);
@@ -365,7 +368,7 @@ generate_path_construction_keys(struct setup_path *path)
 	BUF_MEM *bptr;
 	BIO *bio;
 	int ret;
-	path->construction_certificate = RSA_generate_key(RSA_KEY_LEN, 65537, NULL, NULL);
+	path->construction_certificate = RSA_generate_key(RSA_KEY_LEN, 65537, NULL, NULL); /* XXX: NTRU goes here */
 	if (path->construction_certificate == NULL) {
 		return -1;
 	}
@@ -373,7 +376,7 @@ generate_path_construction_keys(struct setup_path *path)
 	if (bio == NULL) {
 		return -1;
 	}
-	ret = PEM_write_bio_RSAPublicKey(bio, path->construction_certificate);
+	ret = PEM_write_bio_RSAPublicKey(bio, path->construction_certificate); /* XXX: NTRU goes here */
 	if (ret == 0) {
 		BIO_free(bio);
 		return -1;
@@ -415,7 +418,7 @@ generate_setup_packages(const struct config *config, struct setup_path *path, in
 		/* and throw away the old contents of the nodes */
 		/* but save old prev_id for correct symm encryption */
 		for (i = 0; i < path->nnodes; i++) {
-			memcpy(path->sps[i].old_prev_id, path->sps[i].prev_id, SHA_DIGEST_LENGTH);
+			memcpy(path->sps[i].old_prev_id, path->sps[i].prev_id, CRYPTO_DIGEST_LENGTH);
 			path->sps[i].flags |= SUCCESS_FLAG;
 			free(path->contents[i]);
 		}
@@ -436,8 +439,8 @@ generate_setup_packages(const struct config *config, struct setup_path *path, in
 	sps[0]->prev_port = config->port;
 	sps[0]->next_ip = nodes[1]->ip;
 	sps[0]->next_port = nodes[1]->port;
-	rand_bytes(sps[0]->prev_id, SHA_DIGEST_LENGTH);
-	rand_bytes(sps[0]->next_id, SHA_DIGEST_LENGTH);
+	rand_bytes(sps[0]->prev_id, CRYPTO_DIGEST_LENGTH);
+	rand_bytes(sps[0]->next_id, CRYPTO_DIGEST_LENGTH);
 	rand_bytes(sps[0]->replaceseed, SYMMETRIC_CIPHER_KEY_LEN);
 	sps[0]->prev_communication_certificate_flat = config->communication_certificate_flat;
 	sps[0]->next_communication_certificate_flat = nodes[1]->communication_certificate_flat;
@@ -448,9 +451,9 @@ generate_setup_packages(const struct config *config, struct setup_path *path, in
 		sps[i]->prev_port = nodes[i - 1]->port;
 		sps[i]->next_ip = nodes[i + 1]->ip;
 		sps[i]->next_port = nodes[i + 1]->port;
-		rand_bytes(sps[i]->next_id, SHA_DIGEST_LENGTH);
+		rand_bytes(sps[i]->next_id, CRYPTO_DIGEST_LENGTH);
 		rand_bytes(sps[i]->replaceseed, SYMMETRIC_CIPHER_KEY_LEN);
-		memcpy(sps[i]->prev_id, sps[i - 1]->next_id, SHA_DIGEST_LENGTH);
+		memcpy(sps[i]->prev_id, sps[i - 1]->next_id, CRYPTO_DIGEST_LENGTH);
 		sps[i]->prev_communication_certificate_flat = nodes[i - 1]->communication_certificate_flat;
 		sps[i]->next_communication_certificate_flat = nodes[i + 1]->communication_certificate_flat;
 		sps[i]->flags |= nodes[i]->flags;
@@ -461,8 +464,8 @@ generate_setup_packages(const struct config *config, struct setup_path *path, in
 	sps[nnodes - 1]->prev_port = nodes[nnodes - 2]->port;
 	sps[nnodes - 1]->next_ip = config->ip;
 	sps[nnodes - 1]->next_port = config->port;
-	memcpy(sps[nnodes - 1]->prev_id, sps[nnodes - 2]->next_id, SHA_DIGEST_LENGTH);
-	memcpy(sps[nnodes - 1]->next_id, sps[0]->prev_id, SHA_DIGEST_LENGTH);
+	memcpy(sps[nnodes - 1]->prev_id, sps[nnodes - 2]->next_id, CRYPTO_DIGEST_LENGTH);
+	memcpy(sps[nnodes - 1]->next_id, sps[0]->prev_id, CRYPTO_DIGEST_LENGTH);
 	rand_bytes(sps[nnodes - 1]->replaceseed, SYMMETRIC_CIPHER_KEY_LEN);
 	sps[nnodes - 1]->prev_communication_certificate_flat = nodes[nnodes - 2]->communication_certificate_flat;
 	sps[nnodes - 1]->next_communication_certificate_flat = config->communication_certificate_flat;
@@ -532,7 +535,7 @@ encrypt_symmetric(const uint8_t *serialized, uint32_t len, const uint8_t *key, i
 	if (out == NULL) {
 		return NULL;
 	}
-	pad_key(key, SHA_DIGEST_LENGTH, sizedkey, SYMMETRIC_CIPHER_KEY_LEN);
+	pad_key(key, CRYPTO_DIGEST_LENGTH, sizedkey, SYMMETRIC_CIPHER_KEY_LEN);
 	rand_bytes(out, EVP_CIPHER_iv_length(type));
 	EVP_CIPHER_CTX_init(&ctx);
 	ret = EVP_EncryptInit(&ctx, type, sizedkey, out);
@@ -616,7 +619,7 @@ create_dummy(struct dummy_package *dp)
 	/*ProtobufCBinaryData seed;*/
 	/*fixed32 size;*/
 	/*fixed32 flags;*/
-	assert(SYMMETRIC_CIPHER_KEY_LEN >= SHA_DIGEST_LENGTH);
+	assert(SYMMETRIC_CIPHER_KEY_LEN >= CRYPTO_DIGEST_LENGTH);
 	d->seed.len = SYMMETRIC_CIPHER_KEY_LEN;
 	d->seed.data = dp->seed;
 	/* d->size will be set later on */
@@ -672,11 +675,11 @@ sps_to_SetupPackage(struct setup_path *path, int package_index, int nround)
 	}
 	sp->prev_port = ssp->prev_port;
 	sp->next_port = ssp->next_port;
-	sp->prev_id.len = SHA_DIGEST_LENGTH;
+	sp->prev_id.len = CRYPTO_DIGEST_LENGTH;
 	sp->prev_id.data = ssp->prev_id;
-	sp->next_id.len = SHA_DIGEST_LENGTH;
+	sp->next_id.len = CRYPTO_DIGEST_LENGTH;
 	if ((ssp->flags & T_NODE) && (ssp->flags & X_NODE) && !  path->is_reverse_path && nround == 2) {
-		bzero(ssp->next_id, SHA_DIGEST_LENGTH); /* set next_id to all zero */
+		bzero(ssp->next_id, CRYPTO_DIGEST_LENGTH); /* set next_id to all zero */
 	}
 	sp->next_id.data = ssp->next_id;
 	sp->next_communication_certificate_flat.len = ssp->next_communication_certificate_flat->len;
@@ -702,9 +705,9 @@ sps_to_SetupPackage(struct setup_path *path, int package_index, int nround)
 	sp->key_salt.len = SYMMETRIC_CIPHER_KEY_LEN;
 	sp->key_salt.data = ssp->salt;
 	sp->flags = ssp->flags;
-	sp->hash.len = SHA_DIGEST_LENGTH;
+	sp->hash.len = CRYPTO_DIGEST_LENGTH;
 	/* hash will be set later  */
-	sp->external_hash.len = SHA_DIGEST_LENGTH;
+	sp->external_hash.len = CRYPTO_DIGEST_LENGTH;
 	/* external_hash will be set later  */
 	if ((ssp->flags & T_NODE) && path->entrypath && nround == 2) {
 		int ret;
@@ -766,14 +769,14 @@ calculate_expected_size(uint32_t size, EVP_PKEY *pubkey)
 
 struct tracking_info {
 	int nentries;
-	uint8_t endhash[SHA_DIGEST_LENGTH];
+	uint8_t endhash[CRYPTO_DIGEST_LENGTH];
 	struct tracking_entry *entries;
 };
 
 struct tracking_entry {
 	struct tracking_entry *next;
 	struct tracking_entry *prev;
-	uint8_t hash[SHA_DIGEST_LENGTH];
+	uint8_t hash[CRYPTO_DIGEST_LENGTH];
 };
 
 static void
@@ -838,9 +841,9 @@ create_dummy_package_information(SetupPackage **sps, int nnodes)
 	}
 	cur_dummies = 0;
 	for (i = 0; i < nnodes; i++) {
-		bzero(t->entries[i].hash, SHA_DIGEST_LENGTH);
+		bzero(t->entries[i].hash, CRYPTO_DIGEST_LENGTH);
 		LIST_for_all(&curlist, help1, help2){
-			xor(t->entries[i].hash, help1->hash, SHA_DIGEST_LENGTH);
+			xor(t->entries[i].hash, help1->hash, CRYPTO_DIGEST_LENGTH);
 		}
 		for (j = 0; j < sps[i]->n_dummies; j++) {
 			if (LIST_is_empty(&curlist)) {
@@ -865,7 +868,7 @@ create_dummy_package_information(SetupPackage **sps, int nnodes)
 					return NULL;
 				}
 				sps[i]->dummies[j]->flags = DUMMY_INSERT;
-				SHA1(generated, sps[i]->dummies[j]->size, tmp->hash);
+				cryptohash(generated, sps[i]->dummies[j]->size, tmp->hash);
 				free(generated);
 				LIST_insert(&addlist, tmp);
 			} else {
@@ -878,7 +881,7 @@ create_dummy_package_information(SetupPackage **sps, int nnodes)
 					delete--;
 				}
 				assert(sps[i]->dummies[j]->seed.len <= SYMMETRIC_CIPHER_KEY_LEN);
-				memcpy(sps[i]->dummies[j]->seed.data, help1->hash, SHA_DIGEST_LENGTH);
+				memcpy(sps[i]->dummies[j]->seed.data, help1->hash, CRYPTO_DIGEST_LENGTH);
 				sps[i]->dummies[j]->flags = DUMMY_DELETE;
 				LIST_remove(help1);
 				free(help1);
@@ -895,7 +898,7 @@ create_dummy_package_information(SetupPackage **sps, int nnodes)
 	}
 	assert(LIST_is_empty(&addlist));
 	LIST_for_all(&curlist, help1, help2){
-		xor(t->endhash, help1->hash, SHA_DIGEST_LENGTH);
+		xor(t->endhash, help1->hash, CRYPTO_DIGEST_LENGTH);
 	}
 	LIST_clear(&curlist, help1);
 	return t;
@@ -905,14 +908,14 @@ static void
 add_external_hash(SetupPackage *sp, const uint8_t *replaced_hashes, const uint8_t *original_hashes, int idx, const struct tracking_info *tracking, int nnodes)
 {
 	int i;
-	bzero(sp->external_hash.data, SHA_DIGEST_LENGTH);
+	bzero(sp->external_hash.data, CRYPTO_DIGEST_LENGTH);
 	for (i = nnodes - 1; i > idx; i--) {
-		xor(sp->external_hash.data, original_hashes + i * SHA_DIGEST_LENGTH, SHA_DIGEST_LENGTH);
+		xor(sp->external_hash.data, original_hashes + i * CRYPTO_DIGEST_LENGTH, CRYPTO_DIGEST_LENGTH);
 	}
 	for (i = 0; i < idx; i++) {
-		xor(sp->external_hash.data, replaced_hashes + i * SHA_DIGEST_LENGTH, SHA_DIGEST_LENGTH);
+		xor(sp->external_hash.data, replaced_hashes + i * CRYPTO_DIGEST_LENGTH, CRYPTO_DIGEST_LENGTH);
 	}
-	xor(sp->external_hash.data, tracking->entries[idx].hash, SHA_DIGEST_LENGTH);
+	xor(sp->external_hash.data, tracking->entries[idx].hash, CRYPTO_DIGEST_LENGTH);
 }
 
 static uint8_t *
@@ -920,7 +923,7 @@ generate_replaced_hashes(SetupPackage **sps, const uint32_t *sizes, int nnodes)
 {
 	int i;
 	uint8_t *h, *generated;
-	h = malloc(nnodes * SHA_DIGEST_LENGTH);
+	h = malloc(nnodes * CRYPTO_DIGEST_LENGTH);
 	if (h == NULL) {
 		return NULL;
 	}
@@ -930,7 +933,7 @@ generate_replaced_hashes(SetupPackage **sps, const uint32_t *sizes, int nnodes)
 			free(h);
 			return NULL;
 		}
-		SHA1(generated, sizes[i], h + i * SHA_DIGEST_LENGTH);
+		cryptohash(generated, sizes[i], h + i * CRYPTO_DIGEST_LENGTH);
 		free(generated);
 	}
 	return h;
@@ -983,15 +986,15 @@ pack_setup_array(const uint8_t *id, uint8_t **slots, const uint32_t *sizes, int 
 		a.slots[i].data = mixed_slots[i];
 	}
 	total = setup_array__get_packed_size(&a);
-	out = malloc(total + SHA_DIGEST_LENGTH);
+	out = malloc(total + CRYPTO_DIGEST_LENGTH);
 	if (out == NULL) {
 		cleanup_stack_free_all();
 		return NULL;
 	}
-	ret = setup_array__pack(&a, out + SHA_DIGEST_LENGTH);
+	ret = setup_array__pack(&a, out + CRYPTO_DIGEST_LENGTH);
 	assert(ret == total);
-	memcpy(out, id, SHA_DIGEST_LENGTH);
-	*outsize = total + SHA_DIGEST_LENGTH;
+	memcpy(out, id, CRYPTO_DIGEST_LENGTH);
+	*outsize = total + CRYPTO_DIGEST_LENGTH;
 	cleanup_stack_free_all();
 	return out;
 }
@@ -1009,7 +1012,7 @@ create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *
 		return NULL;
 	}
 	cleanup_stack_push(EVP_PKEY_free, privkey);
-	ret = EVP_PKEY_set1_RSA(privkey, path->construction_certificate);
+	ret = EVP_PKEY_set1_RSA(privkey, path->construction_certificate); /* XXX: NTRU goes here */
 	if (ret != 1) {
 		cleanup_stack_free_all();
 		return NULL;
@@ -1026,7 +1029,7 @@ create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *
 		return NULL;
 	}
 	cleanup_stack_push(free, replaced_hashes);
-	original_hashes = malloc(path->nnodes * SHA_DIGEST_LENGTH);
+	original_hashes = malloc(path->nnodes * CRYPTO_DIGEST_LENGTH);
 	if (original_hashes == NULL) {
 		cleanup_stack_free_all();
 		return NULL;
@@ -1052,14 +1055,14 @@ create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *
 			return NULL;
 		}
 		cleanup_stack_push(free, packed[i]);
-		bzero(sps[i]->hash.data, SHA_DIGEST_LENGTH);
+		bzero(sps[i]->hash.data, CRYPTO_DIGEST_LENGTH);
 		ret = setup_package__pack(sps[i], packed[i]);
 		if (ret == 0) {
 			cleanup_stack_free_all();
 			EVP_PKEY_free(pubkey);
 			return NULL;
 		}
-		SHA1(packed[i], sizes[i], sps[i]->hash.data);
+		cryptohash(packed[i], sizes[i], sps[i]->hash.data);
 		ret = setup_package__pack(sps[i], packed[i]);
 		if (ret == 0) {
 			EVP_PKEY_free(pubkey);
@@ -1090,7 +1093,7 @@ create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *
 			cleanup_stack_free_all();
 			return NULL;
 		}
-		sizes[i] += RSA_SIGN_LEN;
+		sizes[i] += RSA_SIGN_LEN; /* XXX: NTRU goes here */
 		assert(expected_sizes[i] == sizes[i]);
 		oldcontents = path->contents[i];
 		path->contents[i] = malloc(sizes[i]);
@@ -1102,12 +1105,12 @@ create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *
 		memcpy(path->contents[i], sig, RSA_SIGN_LEN);
 		memcpy(path->contents[i] + RSA_SIGN_LEN, oldcontents, sizes[i] - RSA_SIGN_LEN);
 		free(oldcontents);
-		SHA1(path->contents[i], sizes[i], original_hashes + i * SHA_DIGEST_LENGTH);
+		cryptohash(path->contents[i], sizes[i], original_hashes + i * CRYPTO_DIGEST_LENGTH);
 	}
-	bzero(path->endhash, SHA_DIGEST_LENGTH);
-	memcpy(path->endhash, tracking_info->endhash, SHA_DIGEST_LENGTH);
+	bzero(path->endhash, CRYPTO_DIGEST_LENGTH);
+	memcpy(path->endhash, tracking_info->endhash, CRYPTO_DIGEST_LENGTH);
 	for (i = 0; i < path->nnodes; i++) {
-		xor(path->endhash, replaced_hashes + i * SHA_DIGEST_LENGTH, SHA_DIGEST_LENGTH);
+		xor(path->endhash, replaced_hashes + i * CRYPTO_DIGEST_LENGTH, CRYPTO_DIGEST_LENGTH);
 	}
 	if (nround == 1) {
 		out = pack_setup_array(path->sps[0].prev_id, path->contents, sizes, path->nnodes, outsize, 1);
@@ -1169,13 +1172,13 @@ pack_setup_packages(struct setup_path *path, uint32_t *outsize, int nround)
 			sps[i]->dummies[j]->size = expected_sizes[rand_range(0, path->nnodes)];
 		}
 		assert(sps[i]->hash.data == NULL);
-		sps[i]->hash.data = malloc(SHA_DIGEST_LENGTH);
+		sps[i]->hash.data = malloc(CRYPTO_DIGEST_LENGTH);
 		if (sps[i]->hash.data == NULL) {
 			cleanup_stack_free_all();
 			return NULL;
 		} /* do notfree hashes -> sps_delete will do it */
 		assert(sps[i]->external_hash.data == NULL);
-		sps[i]->external_hash.data = malloc(SHA_DIGEST_LENGTH);
+		sps[i]->external_hash.data = malloc(CRYPTO_DIGEST_LENGTH);
 		if (sps[i]->external_hash.data == NULL) {
 			cleanup_stack_free_all();
 			return NULL;
@@ -1236,10 +1239,10 @@ static int
 validate_sp(const SetupPackage *sp)
 {
 	uint32_t i;
-	if (sp->prev_id.len != SHA_DIGEST_LENGTH) {
+	if (sp->prev_id.len != CRYPTO_DIGEST_LENGTH) {
 		return -1;
 	}
-	if (sp->next_id.len != SHA_DIGEST_LENGTH) {
+	if (sp->next_id.len != CRYPTO_DIGEST_LENGTH) {
 		return -1;
 	}
 	if (sp->key_seed.len != SYMMETRIC_CIPHER_KEY_LEN) {
@@ -1251,10 +1254,10 @@ validate_sp(const SetupPackage *sp)
 	if (sp->replacement_seed.len != SYMMETRIC_CIPHER_KEY_LEN) {
 		return -1;
 	}
-	if (sp->hash.len != SHA_DIGEST_LENGTH) {
+	if (sp->hash.len != CRYPTO_DIGEST_LENGTH) {
 		return -1;
 	}
-	if (sp->external_hash.len != SHA_DIGEST_LENGTH) {
+	if (sp->external_hash.len != CRYPTO_DIGEST_LENGTH) {
 		return -1;
 	}
 	if (sp->prev_port>>16) {
@@ -1332,8 +1335,8 @@ extract_slot_information(const SetupPackage *sp, struct conn_ctx *conn, int nrou
 	BIO *mem;
 	BUF_MEM bptr;
 	assert(nround == 1 || nround == 2);
-	memcpy(conn->prev_id, sp->prev_id.data, SHA_DIGEST_LENGTH);
-	memcpy(conn->next_id, sp->next_id.data, SHA_DIGEST_LENGTH);
+	memcpy(conn->prev_id, sp->prev_id.data, CRYPTO_DIGEST_LENGTH);
+	memcpy(conn->next_id, sp->next_id.data, CRYPTO_DIGEST_LENGTH);
 	conn->prev_ip = strdup(sp->prev_ip);
 	if (conn->prev_ip == NULL) {
 		return -1;
@@ -1400,26 +1403,26 @@ static int
 check_external_hash(const SetupArray *a, const uint8_t *external_hash, uint32_t own_idx)
 {
 	uint32_t i;
-	uint8_t hash[SHA_DIGEST_LENGTH], result[SHA_DIGEST_LENGTH];
-	bzero(result, SHA_DIGEST_LENGTH);
+	uint8_t hash[CRYPTO_DIGEST_LENGTH], result[CRYPTO_DIGEST_LENGTH];
+	bzero(result, CRYPTO_DIGEST_LENGTH);
 	for (i = 0; i < a->n_slots; i++) {
 		if (i == own_idx)  {
 			continue;
 		}
-		SHA1(a->slots[i].data, a->slots[i].len, hash);
-		xor(result, hash, SHA_DIGEST_LENGTH);
+		cryptohash(a->slots[i].data, a->slots[i].len, hash);
+		xor(result, hash, CRYPTO_DIGEST_LENGTH);
 	}
-	return memcmp(result, external_hash, SHA_DIGEST_LENGTH);
+	return memcmp(result, external_hash, CRYPTO_DIGEST_LENGTH);
 }
 
 static int
 contains_hash_of(const uint8_t *hashes, const uint8_t *data, int len, int nhashes)
 {
 	int i;
-	uint8_t hash[SHA_DIGEST_LENGTH];
-	SHA1(data, len, hash);
+	uint8_t hash[CRYPTO_DIGEST_LENGTH];
+	cryptohash(data, len, hash);
 	for (i = 0; i < nhashes; i++) {
-		if (!memcmp(hashes + i * SHA_DIGEST_LENGTH, hash, SHA_DIGEST_LENGTH)) {
+		if (!memcmp(hashes + i * CRYPTO_DIGEST_LENGTH, hash, CRYPTO_DIGEST_LENGTH)) {
 			return 1;
 		}
 	}
@@ -1458,7 +1461,7 @@ modify_setup_array(const SetupArray *a, const SetupPackage *sp, const uint8_t *i
 	cleanup_stack_push(free, sizes);
 	delete_hashes = NULL;
 	if (deletes) {
-		delete_hashes = malloc(deletes * SHA_DIGEST_LENGTH);
+		delete_hashes = malloc(deletes * CRYPTO_DIGEST_LENGTH);
 		if (delete_hashes == NULL) {
 			cleanup_stack_free_all();
 			return NULL;
@@ -1467,7 +1470,7 @@ modify_setup_array(const SetupArray *a, const SetupPackage *sp, const uint8_t *i
 		cleanup_stack_push(free, delete_hashes);
 		for (i = 0; i < sp->n_dummies; i++) {
 			if (sp->dummies[i]->flags & DUMMY_DELETE) {
-				memcpy(delete_hashes + cnt * SHA_DIGEST_LENGTH, sp->dummies[i]->seed.data, SHA_DIGEST_LENGTH);
+				memcpy(delete_hashes + cnt * CRYPTO_DIGEST_LENGTH, sp->dummies[i]->seed.data, CRYPTO_DIGEST_LENGTH);
 				cnt++;
 			}
 		}
@@ -1515,11 +1518,11 @@ extract_setup_array(const uint8_t *sa, int sa_len, const uint8_t *id, const stru
 	SetupArray *a;
 	int outlen, written1, written2, ret, own_idx;
 	uint32_t i, package_size, pubkey_size;
-	uint8_t *out, hash[SHA_DIGEST_LENGTH], *oldout, received_hash[SHA_DIGEST_LENGTH], sizedkey[SYMMETRIC_CIPHER_KEY_LEN];
+	uint8_t *out, hash[CRYPTO_DIGEST_LENGTH], *oldout, received_hash[CRYPTO_DIGEST_LENGTH], sizedkey[SYMMETRIC_CIPHER_KEY_LEN];
 	SetupPackage *sp;
 	EVP_CIPHER_CTX ctx;
 	cleanup_stack_init;
-	pad_key(id, SHA_DIGEST_LENGTH, sizedkey, SYMMETRIC_CIPHER_KEY_LEN);
+	pad_key(id, CRYPTO_DIGEST_LENGTH, sizedkey, SYMMETRIC_CIPHER_KEY_LEN);
 	a = setup_array__unpack(NULL, sa_len, sa);
 	if (a == NULL) {
 		return NULL;
@@ -1620,18 +1623,18 @@ extract_setup_array(const uint8_t *sa, int sa_len, const uint8_t *id, const stru
 			cleanup_stack_free_all();
 			return NULL;
 		}
-		memcpy(received_hash, sp->hash.data, SHA_DIGEST_LENGTH);
+		memcpy(received_hash, sp->hash.data, CRYPTO_DIGEST_LENGTH);
 		bzero(out, outlen);
-		bzero(sp->hash.data, SHA_DIGEST_LENGTH);
+		bzero(sp->hash.data, CRYPTO_DIGEST_LENGTH);
 		assert(setup_package__get_packed_size(sp) == (uint32_t) outlen);
 		setup_package__pack(sp, out);
-		SHA1(out, outlen, hash);
-		if (memcmp(hash, received_hash, SHA_DIGEST_LENGTH)) {
+		cryptohash(out, outlen, hash);
+		if (memcmp(hash, received_hash, CRYPTO_DIGEST_LENGTH)) {
 			setup_package_cleanup_helper(sp);
 			cleanup_stack_pop(); /* out */
 			continue; /* wrong package */
 		}
-		memcpy(sp->hash.data, received_hash, SHA_DIGEST_LENGTH);
+		memcpy(sp->hash.data, received_hash, CRYPTO_DIGEST_LENGTH);
 		cleanup_stack_pop(); /* out */
 		own_idx = i;
 		break;
@@ -1660,7 +1663,7 @@ handle_first_round_setup_array(const struct config *config, const uint8_t *sa, i
 	}
 	cleanup_stack_push(setup_package_cleanup_helper, sp);
 	cleanup_stack_push(sa_array_cleanup_helper, a);
-	if (memcmp(sp->prev_id.data, id, SHA_DIGEST_LENGTH)) {
+	if (memcmp(sp->prev_id.data, id, CRYPTO_DIGEST_LENGTH)) {
 		cleanup_stack_free_all();
 		return NULL;
 	}
@@ -1697,7 +1700,7 @@ handle_second_round_setup_array(const struct config *config, const uint8_t *sa, 
 	uint8_t *new;
 	EVP_PKEY *key;
 	cleanup_stack_init;
-	if (memcmp(oldconn->prev_id, id, SHA_DIGEST_LENGTH)) {
+	if (memcmp(oldconn->prev_id, id, CRYPTO_DIGEST_LENGTH)) {
 		return NULL;
 	}
 	a = extract_setup_array(sa, sa_len, id, config, &own_idx, &sp);
@@ -1760,12 +1763,12 @@ send_x_package(struct setup_path *path, const struct config *config)
 	if (! X509_compare(path->ssl_conn->peer_cert, path->nodes[x_idx].communication_certificate)) {
 		return -1;
 	}
-	serialize_32_t(SHA_DIGEST_LENGTH, preface);
+	serialize_32_t(CRYPTO_DIGEST_LENGTH, preface);
 	ret = ssl_write(path->ssl_conn->ssl, preface, 4);
 	if (ret != 0) {
 		return -1;
 	}
-	ret = ssl_write(path->ssl_conn->ssl, path->sps[x_idx].prev_id, SHA_DIGEST_LENGTH);
+	ret = ssl_write(path->ssl_conn->ssl, path->sps[x_idx].prev_id, CRYPTO_DIGEST_LENGTH);
 	if (ret != 0) {
 		return -1;
 	}
@@ -1803,14 +1806,14 @@ static int
 check_package(const uint8_t *endhash, const uint8_t *endid, const uint8_t *package, uint32_t len)
 {
 	SetupArray *a;
-	uint8_t hash[SHA_DIGEST_LENGTH], result[SHA_DIGEST_LENGTH];
+	uint8_t hash[CRYPTO_DIGEST_LENGTH], result[CRYPTO_DIGEST_LENGTH];
 	uint32_t i;
 	int ret;
 	cleanup_stack_init;
 	if (memcmp(endid, package, SHA_DIGEST_LENGTH)) {
 		return -1;
 	}
-	a = setup_array__unpack(NULL, len - SHA_DIGEST_LENGTH, package + SHA_DIGEST_LENGTH);
+	a = setup_array__unpack(NULL, len - CRYPTO_DIGEST_LENGTH, package + CRYPTO_DIGEST_LENGTH);
 	if (a == NULL) {
 		return -1;
 	}
@@ -1820,12 +1823,12 @@ check_package(const uint8_t *endhash, const uint8_t *endid, const uint8_t *packa
 		cleanup_stack_free_all();
 		return -1;
 	}
-	bzero(result, SHA_DIGEST_LENGTH);
+	bzero(result, CRYPTO_DIGEST_LENGTH);
 	for (i = 0; i < a->n_slots; i++) {
 		SHA(a->slots[i].data, a->slots[i].len, hash);
-		xor(result, hash, SHA_DIGEST_LENGTH);
+		xor(result, hash, CRYPTO_DIGEST_LENGTH);
 	}
-	if (!memcmp(result, endhash, SHA_DIGEST_LENGTH)) {
+	if (!memcmp(result, endhash, CRYPTO_DIGEST_LENGTH)) {
 		cleanup_stack_free_all();
 		return -1;
 	}
@@ -1926,7 +1929,7 @@ construct_path(const struct config *config, int want_entrypath, int reserve_ap)
 		delete_struct_setup_path(path);
 		return NULL;
 	}
-	if (wait->len < SHA_DIGEST_LENGTH) {
+	if (wait->len < CRYPTO_DIGEST_LENGTH) {
 		free_awaited_connection(wait);
 		delete_struct_setup_path(path);
 		return NULL;
@@ -1957,7 +1960,7 @@ construct_path(const struct config *config, int want_entrypath, int reserve_ap)
 		delete_struct_setup_path(path);
 		return NULL;
 	}
-	if (outsize < SHA_DIGEST_LENGTH) {
+	if (outsize < CRYPTO_DIGEST_LENGTH) {
 		free_awaited_connection(wait);
 		free(package);
 		delete_struct_setup_path(path);
@@ -1999,7 +2002,7 @@ construct_path(const struct config *config, int want_entrypath, int reserve_ap)
 	if (path->is_reverse_path) {
 		for (x_idx = path->nnodes - 1; x_idx >= 0; x_idx--) {
 			if (path->sps[x_idx].flags & X_NODE) {
-				memcpy(p->peer_id, path->sps[x_idx].next_id, SHA_DIGEST_LENGTH);
+				memcpy(p->peer_id, path->sps[x_idx].next_id, CRYPTO_DIGEST_LENGTH);
 				p->peer_ip = strdup(path->nodes[x_idx].ip);
 				if (p->peer_ip == NULL) {
 					delete_struct_setup_path(path);
@@ -2033,7 +2036,7 @@ construct_path(const struct config *config, int want_entrypath, int reserve_ap)
 	} else {
 		for (x_idx = 0; x_idx < path->nnodes; x_idx++) {
 			if (path->sps[x_idx].flags & X_NODE) {
-				memcpy(p->peer_id, path->sps[x_idx].prev_id, SHA_DIGEST_LENGTH);
+				memcpy(p->peer_id, path->sps[x_idx].prev_id, CRYPTO_DIGEST_LENGTH);
 				p->peer_ip = strdup(path->nodes[x_idx].ip);
 				if (p->peer_ip == NULL) {
 					free_path(p);

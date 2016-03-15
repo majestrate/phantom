@@ -30,7 +30,7 @@ free_rpc_return(struct rpc_return *r)
 static int
 check_node_info_message(const NodeInfo *n)
 {
-	if (n->id.len != SHA_DIGEST_LENGTH) {
+	if (n->id.len != CRYPTO_DIGEST_LENGTH) {
 		return -1;
 	}
 	if (n->port>>16) {
@@ -98,7 +98,7 @@ ssl_connect_check_hash(const char *ip, uint16_t port, X509 *cert, EVP_PKEY *priv
 {
 	int ret;
 	struct ssl_connection *c;
-	uint8_t hash[SHA_DIGEST_LENGTH];
+	uint8_t hash[CRYPTO_DIGEST_LENGTH];
 	assert(peer_id);
 	assert(ip);
 	assert(cert);
@@ -112,7 +112,7 @@ ssl_connect_check_hash(const char *ip, uint16_t port, X509 *cert, EVP_PKEY *priv
 		free_ssl_connection(c);
 		return NULL;
 	}
-	if (memcmp(hash, peer_id, SHA_DIGEST_LENGTH)) {
+	if (memcmp(hash, peer_id, CRYPTO_DIGEST_LENGTH)) {
 		printf("fake node encountered with ip %s\n", ip);
 		free_ssl_connection(c);
 		return NULL;
@@ -167,7 +167,7 @@ rpc_find_node(uint8_t *id, const struct kad_node_info *n, X509 *cert, EVP_PKEY *
 	rpc_ret->success = 0;
 	find_close_nodes__init(&package);
 	package.id.data = id;
-	package.id.len = SHA_DIGEST_LENGTH;
+	package.id.len = CRYPTO_DIGEST_LENGTH;
 	package.self = self;
 	size = find_close_nodes__get_packed_size(&package);
 	packed = malloc(size + 4);
@@ -233,7 +233,7 @@ rpc_find_value(uint8_t *key, const struct kad_node_info *n, X509 *cert, EVP_PKEY
 		return NULL;
 	}
 	find_value__init(&package);
-	package.key.len = SHA_DIGEST_LENGTH;
+	package.key.len = CRYPTO_DIGEST_LENGTH;
 	package.key.data = key;
 	package.self = self;
 	size = find_value__get_packed_size(&package);
@@ -312,7 +312,7 @@ rpc_store(uint8_t *key, uint8_t *data, uint32_t len, const struct kad_node_info 
 	assert(self);
 	store__init(&package);
 	package.key.data = key;
-	package.key.len = SHA_DIGEST_LENGTH;
+	package.key.len = CRYPTO_DIGEST_LENGTH;
 	package.data.data = data;
 	package.data.len = len;
 	package.self = self;
@@ -358,7 +358,7 @@ static int
 validate_find_close_nodes(const FindCloseNodes *package)
 {
 	assert(package);
-	if (package->id.len != SHA_DIGEST_LENGTH) {
+	if (package->id.len != CRYPTO_DIGEST_LENGTH) {
 		return -1;
 	}
 	return check_node_info_message(package->self);
@@ -368,7 +368,7 @@ static int
 validate_find_value(const FindValue *package)
 {
 	assert(package);
-	if (package->key.len != SHA_DIGEST_LENGTH) {
+	if (package->key.len != CRYPTO_DIGEST_LENGTH) {
 		return -1;
 	}
 	return check_node_info_message(package->self);
@@ -378,7 +378,7 @@ static int
 validate_store_request(const Store *request)
 {
 	assert(request);
-	if (request->key.len != SHA_DIGEST_LENGTH) {
+	if (request->key.len != CRYPTO_DIGEST_LENGTH) {
 		return -1;
 	}
 	if (request->data.len < 1) {
@@ -432,7 +432,7 @@ new_node_info_array(const struct kad_node_list *list)
 	}
 	i = 0;
 	LIST_for_all(&list->list, help1, help2) {
-		out[i]->id.len = SHA_DIGEST_LENGTH;
+		out[i]->id.len = CRYPTO_DIGEST_LENGTH;
 		out[i]->id.data = help1->id;
 		out[i]->port = help1->port;
 		out[i]->ip = help1->ip;
@@ -477,7 +477,7 @@ int handle_rpc_find_node(SSL *from, X509 *cert, uint8_t *package, int size)
 	struct kad_node_list *list;
 	uint32_t packed_size, ret;
 	struct kad_node_info *n;
-	uint8_t *packed, hash[SHA_DIGEST_LENGTH];
+	uint8_t *packed, hash[CRYPTO_DIGEST_LENGTH];
 	assert(from);
 	assert(cert);
 	assert(package);
@@ -581,7 +581,7 @@ int handle_rpc_find_value(SSL *from, X509 *cert, uint8_t *package, int size)
 		reply.n_nodes = 0;
 	} else {
 		/* nothing was found - return nodes */
-		uint8_t hash[SHA_DIGEST_LENGTH];
+		uint8_t hash[CRYPTO_DIGEST_LENGTH];
 		reply.success = 0;
 		reply.has_data = 0;
 		ret = X509_hash(cert, hash);

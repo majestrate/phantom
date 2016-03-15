@@ -32,7 +32,7 @@
 struct awaited_connection {
 	struct awaited_connection *next;
 	struct awaited_connection *prev;
-	uint8_t id[SHA_DIGEST_LENGTH];
+	uint8_t id[CRYPTO_DIGEST_LENGTH];
 	int permanent;
 	char *ip;
 	sem_t sem;

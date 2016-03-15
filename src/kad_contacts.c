@@ -15,7 +15,7 @@ write_contact(FILE *f, struct kad_node_info *contact)
 	struct X509_flat *cert = NULL, *pbc = NULL;
 	int ret = -1;
 	assert(contact);
-	ret = fwrite(contact->id, SHA_DIGEST_LENGTH, 1, f);
+	ret = fwrite(contact->id, CRYPTO_DIGEST_LENGTH, 1, f);
 	if (ret != 1) {
 		ret = -1;
 		goto abort;
@@ -54,7 +54,7 @@ abort:
 static int
 read_contact(FILE *f, struct kad_node_info *contact)
 {
-	uint8_t id[SHA_DIGEST_LENGTH];
+	uint8_t id[CRYPTO_DIGEST_LENGTH];
 	struct kad_node_info *new;
 	X509 *x = NULL, *xp = NULL;
 	short port;
@@ -63,7 +63,7 @@ read_contact(FILE *f, struct kad_node_info *contact)
 	int ret = -1;
 	assert(f);
 	assert(contact);
-	ret = fread(id, SHA_DIGEST_LENGTH, 1, f);
+	ret = fread(id, CRYPTO_DIGEST_LENGTH, 1, f);
 	if (ret != 1) {
 		ret = -1;
 		goto abort;

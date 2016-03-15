@@ -10,8 +10,9 @@
 #include "x509_flat.h"
 #include "kademlia.pb-c.h"
 #include "addr.h"
+#include "hash.h"
 
-#define NBUCKETS (SHA_DIGEST_LENGTH * 8)
+#define NBUCKETS (CRYPTO_DIGEST_LENGTH * 8)
 #define CHECKQUITTIMEOUT 5
 #define KADEMLIA_K 20
 #define KADEMLIA_ALPHA 3
@@ -34,7 +35,7 @@ struct thread {
 struct kad_node_info {
 	struct kad_node_info *prev;
 	struct kad_node_info *next;
-	uint8_t id[SHA_DIGEST_LENGTH];
+	uint8_t id[CRYPTO_DIGEST_LENGTH];
 	X509 *cert;
 	X509 *pbc;
 	uint16_t port;
@@ -73,7 +74,7 @@ struct kad {
 	struct ping_nodes *ping;
 	struct disk_cache *cache;
 	const struct config *config;
-	uint8_t own_id[SHA_DIGEST_LENGTH];
+	uint8_t own_id[CRYPTO_DIGEST_LENGTH];
 	struct updates updates;
 	int quit;
 	NodeInfo self;
