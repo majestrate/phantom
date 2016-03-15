@@ -38,7 +38,7 @@ indent:
 	SIMPLE_BACKUP_SUFFIX=.b4indent indent -kr -i8 -ts8 -sob -l80 -ss -bs -psl -cli8 *.c
 
 clean:
-	rm -f $(OBJECTS) $(PROTO_OBJS) $(PROTO_GENS) $(PROTO_HDR) $(BINARY) $(BINARYD) $(OBJECTSD) *.c.b4indent *.log *.plist
+	rm -f $(OBJECTS) $(PROTO_OBJS) $(PROTO_GENS) $(PROTO_HDRS) $(BINARY) $(BINARYD) $(OBJECTSD) *.c.b4indent *.log *.plist
 
 efence: $(OBJECTS) $(PROTO_OBJS)
 	$(CC) -o $(BINARY) $(OBJECTS) $(PROTO_OBJS) $(CFLAGS) $(LIBS) -lefence
