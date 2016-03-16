@@ -60,13 +60,13 @@ int
 get_entry_nodes_for_ap_adress(char ***ip_adresses, uint16_t **ports, int *num, const struct in6_addr *ap_adress)
 {
 	RoutingTableEntry *re;
-	uint8_t hash[SHA_DIGEST_LENGTH], *re_data;
+	uint8_t hash[CRYPTO_DIGEST_LENGTH], *re_data;
 	uint32_t i;
 	size_t re_len;
 	char **iip_adresses;
 	uint16_t *iports;
 	int ret;
-	SHA1(ap_adress->s6_addr, sizeof (ap_adress->s6_addr), hash);
+	cryptohash(ap_adress->s6_addr, sizeof (ap_adress->s6_addr), hash);
 	ret = kad_find(hash, &re_data, &re_len);
 	if (ret != 0) {
 		return -1;

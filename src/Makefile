@@ -2,12 +2,12 @@ PROTO_SRCS := $(wildcard *.proto)
 PROTO_OBJS := $(PROTO_SRCS:.proto=.pb-c.o)
 PROTO_GENS := $(PROTO_SRCS:.proto=.pb-c.c)
 PROTO_HDRS := $(PROTO_SRCS:.proto=.pb-c.h)
-SOURCES=helper.c netdb.c path.c x509_flat.c config.c server.c conn_ctx.c logger.c openssl_locking.c rc4rand.c tunnel.c kademlia.c diskcache.c kademlia_rpc.c kad_contacts.c main.c thread_pool.c tun.c drop_privs.c addr.c measure.c
+SOURCES=helper.c netdb.c path.c x509_flat.c config.c server.c conn_ctx.c logger.c openssl_locking.c rc4rand.c tunnel.c kademlia.c diskcache.c kademlia_rpc.c kad_contacts.c main.c thread_pool.c tun.c drop_privs.c addr.c measure.c sign.c
 OBJECTS=$(SOURCES:.c=.o)
 OBJECTSD=phantomd.o
 CC=clang
 CFLAGS=-O0 -g -pipe -D_POSIX_C_SOURCE=200112L -I/usr/include/libxml2 -Wall -Werror -Wextra -Wbad-function-cast -Wcast-qual -Wdeclaration-after-statement -Wmissing-prototypes -Wpointer-arith -Wshadow -Wstrict-prototypes -Wformat -Wformat-security -Wunused -Wwrite-strings -Waggregate-return -pedantic -Wuninitialized -fstack-protector-all
-LIBS=-lcrypto -lssl -lxml2 -lrt -lpthread -lprotobuf-c
+LIBS=-lcrypto -lssl -lxml2 -lrt -lpthread -lprotobuf-c -lsodium
 #LIBS=-lcrypto -lssl -lxml2 -lrt -lpthread -lprotobuf-c -I../lssl/openssl-1.0.0 L../lssl/openssl-1.0.0
 BINARY=phantom
 BINARYD=phantomd

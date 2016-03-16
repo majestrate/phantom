@@ -1,6 +1,7 @@
 #include "path.h"
 #include "server.h"
 #include "kdf.h"
+#include "sign.h"
 
 static int
 add_routing_table_entry(SetupPackage *s, struct in6_addr *ap_adress, char *const *ips, int nips)
@@ -565,48 +566,6 @@ encrypt_symmetric(const uint8_t *serialized, uint32_t len, const uint8_t *key, i
 	return out;
 }
 
-static int
-sign_data(uint8_t *sig, const uint8_t *data, uint32_t len, EVP_PKEY *key)
-{
-	int ret;
-	uint32_t written;
-	EVP_MD_CTX ctx;
-	const EVP_MD *type = EVP_sha1();
-	EVP_MD_CTX_init(&ctx);
-	EVP_SignInit(&ctx, type);
-	ret = EVP_SignUpdate(&ctx, data, len);
-	if (ret != 1) {
-		return -1;
-	}
-	ret = EVP_SignFinal(&ctx, sig, &written, key);
-	if (ret != 1) {
-		return -1;
-	}
-	EVP_MD_CTX_cleanup(&ctx);
-	assert(written == RSA_SIGN_LEN);
-	return 0;
-}
-
-static int
-check_signed_data(const uint8_t *sig, uint32_t siglen, const uint8_t *data, uint32_t len, EVP_PKEY *key)
-{
-	int ret;
-	EVP_MD_CTX ctx;
-	const EVP_MD *type = EVP_sha1();
-	EVP_MD_CTX_init(&ctx);
-	EVP_VerifyInit(&ctx, type);
-	ret = EVP_VerifyUpdate(&ctx, data, len);
-	if (ret != 1) {
-		return -1;
-	}
-	ret = EVP_VerifyFinal(&ctx, sig, siglen, key);
-	if (ret != 1) {
-		return -1;
-	}
-	EVP_MD_CTX_cleanup(&ctx);
-	return 0;
-}
-
 static DummySetupPackage *
 create_dummy(struct dummy_package *dp)
 {
@@ -1002,17 +961,17 @@ pack_setup_array(const uint8_t *id, uint8_t **slots, const uint32_t *sizes, int 
 static uint8_t *
 create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *expected_sizes, uint32_t *sizes, const struct tracking_info *tracking_info, uint32_t *outsize, int nround)
 {
-	EVP_PKEY *privkey;
+	struct SECRET_KEY *privkey;
 	uint8_t *replaced_hashes, *original_hashes, **packed, *out;
 	int ret, i;
 	cleanup_stack_init;
-	privkey = EVP_PKEY_new();
+	privkey = SECRET_KEY_new();
 	if (privkey == NULL) {
 		cleanup_stack_free_all();
 		return NULL;
 	}
-	cleanup_stack_push(EVP_PKEY_free, privkey);
-	ret = EVP_PKEY_set1_RSA(privkey, path->construction_certificate); /* XXX: NTRU goes here */
+	cleanup_stack_push(SECRET_KEY_free, privkey);
+	ret = SECRET_KEY_set_CURVE25519(privkey, path->construction_certificate); 
 	if (ret != 1) {
 		cleanup_stack_free_all();
 		return NULL;
@@ -1093,7 +1052,7 @@ create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *
 			cleanup_stack_free_all();
 			return NULL;
 		}
-		sizes[i] += RSA_SIGN_LEN; /* XXX: NTRU goes here */
+		sizes[i] += RSA_SIGN_LEN; 
 		assert(expected_sizes[i] == sizes[i]);
 		oldcontents = path->contents[i];
 		path->contents[i] = malloc(sizes[i]);
