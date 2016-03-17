@@ -7,13 +7,6 @@
 #include <strings.h>
 #include <stdlib.h>
 #include <arpa/inet.h>
-#include <openssl/ssl.h>
-#include <openssl/rsa.h>
-#include <openssl/aes.h>
-#include <openssl/buffer.h>
-#include <openssl/engine.h>
-#include <openssl/evp.h>
-#include <openssl/bn.h>
 #include "node_info.h"
 #include "netdb.h"
 #include "config.h"
@@ -24,10 +17,11 @@
 #include "setuppackage.pb-c.h"
 #include "cleanup_stack.h"
 #include "hash.h"
+#include "key.h"
+#include "symmetric.h"
 
 #define MAX_DUMMIES 3
 #define MIN_DUMMIES 1
-#define PBKDF2_STEPS 100
 #define DUMMY_INSERT (0x1)
 #define DUMMY_DELETE (0x2)
 
@@ -42,9 +36,9 @@ struct setup_package {
 	uint8_t next_id[CRYPTO_DIGEST_LENGTH];
 	char *prev_ip;
 	char *next_ip;
-	struct X509_flat *prev_communication_certificate_flat;
-	struct X509_flat *next_communication_certificate_flat;
-	RSA *construction_certificate;
+  struct PUBLIC_KEY *prev_communication_key;
+  struct PUBLIC_KEY *next_communication_key;
+  struct PUBLIC_KEY *construction_key;
 	uint16_t next_port;
 	uint16_t prev_port;
 	uint32_t flags;
@@ -64,19 +58,16 @@ struct setup_path {
 	uint32_t *sizes;
 	uint8_t **contents;
 	struct setup_package *sps;
-	int construction_certificate_len;
-	uint8_t *construction_certificate_data;
 	uint8_t endhash[CRYPTO_DIGEST_LENGTH];
 	uint32_t entrypath;
-	struct ssl_connection *ssl_conn;
+	struct node_connection *conn;
 	/* is_reverse_path == 1 if we start with many y nodes */
 	int is_reverse_path;
 	int reserve_ap_adress;
 	char *entry_ip;
 	struct in6_addr ap;
-	RSA *construction_certificate;
-	const X509 *routing_certificate;
-	struct X509_flat *routing_certificate_flat;
+  struct KeyPair * construction_keypair;
+  struct PUBLIC_KEY * routing_key;
 };
 
 struct path {
@@ -84,7 +75,7 @@ struct path {
 	int is_entrypath;
 	struct in6_addr ap;
 	struct xkeys **xkeys;
-	struct ssl_connection *conn;
+	struct node_connection *conn;
 	uint8_t peer_id[CRYPTO_DIGEST_LENGTH];
 	char *peer_ip;
 	uint16_t peer_port;

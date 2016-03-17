@@ -1,12 +1,12 @@
-#ifndef __HAVE_CONFIG_CTX_H__
-#define __HAVE_CONFIG_CTX_H__
+#ifndef __HAVE_CONN_CTX_H__
+#define __HAVE_CONN_CTX_H__
 
-#include <openssl/rsa.h>
-#include <openssl/x509.h>
 #include <inttypes.h>
 #include "hash.h"
+#include "key.h"
 #include "config.h"
 #include "helper.h"
+#include "conn.h"
 
 struct xkeys {
 	int nkeys;
@@ -32,11 +32,11 @@ struct conn_ctx {
 	uint16_t peer_port; /* used for terminating nodes */
 	X509 *peer_cert; /* used for terminating nodes */
 	struct xkeys *keys;
-	struct ssl_connection *to_next;
-	X509 *prev_communication_certificate;
-	X509 *next_communication_certificate;
-	X509 *routing_certificate;
-	RSA *construction_certificate;
+	struct node_connection *to_next;
+  struct PUBLIC_KEY * prev_communication_key;
+  struct PUBLIC_KEY * next_communication_key;
+  struct PUBLIC_KEY * routing_key;
+  struct PUBLIC_KEY * construction_key;
 	/* optional */
 	struct in6_addr ap;
 	struct rte rte;

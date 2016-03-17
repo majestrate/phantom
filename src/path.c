@@ -2,6 +2,7 @@
 #include "server.h"
 #include "kdf.h"
 #include "sign.h"
+#include "asymmetric.h"
 
 static int
 add_routing_table_entry(SetupPackage *s, struct in6_addr *ap_adress, char *const *ips, int nips)
@@ -71,12 +72,10 @@ generate_conn_keys(int nkeys, const uint8_t *basekey, const uint8_t *salt)
 	cleanup_stack_push(free, keys->keys);
 	memcpy(tmp, basekey, SYMMETRIC_CIPHER_KEY_LEN);
 	for (i = 0; i < nkeys; i++) {
-		/* PKCS5_PBKDF2_HMAC_SHA1((char *) tmp, SYMMETRIC_CIPHER_KEY_LEN, salt, SYMMETRIC_CIPHER_KEY_LEN, PBKDF2_STEPS, SYMMETRIC_CIPHER_KEY_LEN, keys->keys + SYMMETRIC_CIPHER_KEY_LEN * i); */
     kdf((char*) tmp, SYMMETRIC_CIPHER_KEY_LEN, salt, SYMMETRIC_CIPHER_KEY_LEN, KDF_STEPS, SYMMETRIC_CIPHER_KEY_LEN, keys->keys + SYMMETRIC_CIPHER_KEY_LEN * i);
 		memcpy(tmp, keys->keys + SYMMETRIC_CIPHER_KEY_LEN * i, SYMMETRIC_CIPHER_KEY_LEN);
 	}
 	for (i = 0; i < nkeys; i++) {
-		/* PKCS5_PBKDF2_HMAC_SHA1((char *) tmp, SYMMETRIC_CIPHER_IV_LEN, salt, SYMMETRIC_CIPHER_IV_LEN, PBKDF2_STEPS, SYMMETRIC_CIPHER_IV_LEN, keys->ivs + SYMMETRIC_CIPHER_IV_LEN * i); */
     kdf((char*) tmp, SYMMETRIC_CIPHER_IV_LEN, salt, SYMMETRIC_CIPHER_IV_LEN, KDF_STEPS, SYMMETRIC_CIPHER_IV_LEN, keys->keys + SYMMETRIC_CIPHER_IV_LEN * i);
 		memcpy(tmp, keys->ivs + SYMMETRIC_CIPHER_IV_LEN * i, SYMMETRIC_CIPHER_IV_LEN);
 	}
@@ -101,17 +100,11 @@ delete_nodes(struct node_info *array, int len)
 {
 	int i;
 	for (i = 0; i < len; i++) {
-		if (array[i].construction_certificate != NULL) {
-			X509_free(array[i].construction_certificate);
+		if (array[i].construction_key != NULL) {
+			PUBLIC_KEY_free(array[i].construction_key);
 		}
-		if (array[i].communication_certificate != NULL) {
-			X509_free(array[i].communication_certificate);
-		}
-		if (array[i].construction_certificate_flat != NULL) {
-			free_X509_flat(array[i].construction_certificate_flat);
-		}
-		if (array[i].communication_certificate_flat != NULL) {
-			free_X509_flat(array[i].communication_certificate_flat);
+		if (array[i].communication_key != NULL) {
+			PUBLIC_KEY_free(array[i].communication_key);
 		}
 		if (array[i].ip != NULL) {
 			free(array[i].ip);
@@ -137,8 +130,8 @@ delete_struct_setup_path2(struct setup_path *path, int save_conn)
 	if (path->nodes != NULL) {
 		delete_nodes(path->nodes, path->nnodes);
 	}
-	if (path->construction_certificate != NULL) {
-    RSA_free(path->construction_certificate); /* XXX: NTRU goes here */
+	if (path->construction_keypair != NULL) {
+    KeyPair_free(path->construction_keypair);
 	}
 	if (path->sizes != NULL) {
 		free(path->sizes);
@@ -161,9 +154,6 @@ delete_struct_setup_path2(struct setup_path *path, int save_conn)
 	}
 	if (path->ssl_conn != NULL && (! save_conn)) {
 		free_ssl_connection(path->ssl_conn);
-	}
-	if (path->construction_certificate_data != NULL) {
-		free(path->construction_certificate_data);
 	}
 	free(path);
 }
@@ -189,8 +179,7 @@ create_struct_setup_path(const struct config *config, int want_entrypath, int re
 	p->nnodes = config->nynodes + config->nxnodes;
 	p->entrypath = want_entrypath;
 	if (! reserve_ap) {
-		p->routing_certificate = config->routing_certificate;
-		p->routing_certificate_flat = config->routing_certificate_flat;
+    p->routing_key = KeyPair_get_public_key(config->routing_keypair);
 		bzero(p->ap.s6_addr, 16);
 		ret = reserve_new_ap_adress(config, &p->ap);
 		if (ret != 0) {
@@ -239,7 +228,7 @@ get_nodes_from_db(struct node_info *nodes, int num)
 	int i, ret;
 	char **ips;
 	uint16_t *ports;
-	X509 **ccs, **pbcs;
+	struct PUBLIC_KEY **ccs, **pbcs;
 	cleanup_stack_init;
 	ips = malloc(num * sizeof (char *));
 	if (ips == NULL) {
@@ -252,13 +241,13 @@ get_nodes_from_db(struct node_info *nodes, int num)
 		return -1;
 	}
 	cleanup_stack_push(free, ports);
-	ccs = malloc(num * sizeof (X509 *));
+	ccs = malloc(num * sizeof (struct PUBLIC_KEY *));
 	if (ccs == NULL) {
 		cleanup_stack_free_all();
 		return -1;
 	}
 	cleanup_stack_push(free, ccs);
-	pbcs = malloc(num * sizeof(X509 *));
+	pbcs = malloc(num * sizeof(struct PUBLIC_KEY *));
 	if (pbcs == NULL) {
 		cleanup_stack_free_all();
 		return -1;
@@ -268,10 +257,8 @@ get_nodes_from_db(struct node_info *nodes, int num)
 	assert(ret == num);
 	for (i = 0; i < num; i++) {
 		nodes[i].ip = ips[i];
-		nodes[i].communication_certificate = ccs[i];
-		nodes[i].construction_certificate = pbcs[i];
-		nodes[i].communication_certificate_flat = flatten_X509(ccs[i]);
-		nodes[i].construction_certificate_flat = flatten_X509(pbcs[i]);
+		nodes[i].communication_key = ccs[i];
+		nodes[i].construction_key = pbcs[i];
 		nodes[i].port = ports[i];
 	}
 	cleanup_stack_free_all();
@@ -366,33 +353,10 @@ printpath(const struct setup_path *path)
 static int
 generate_path_construction_keys(struct setup_path *path)
 {
-	BUF_MEM *bptr;
-	BIO *bio;
-	int ret;
-	path->construction_certificate = RSA_generate_key(RSA_KEY_LEN, 65537, NULL, NULL); /* XXX: NTRU goes here */
-	if (path->construction_certificate == NULL) {
+	path->construction_keypair = KeyPair_gen();
+	if (path->construction_keypair == NULL) {
 		return -1;
 	}
-	bio = BIO_new(BIO_s_mem());
-	if (bio == NULL) {
-		return -1;
-	}
-	ret = PEM_write_bio_RSAPublicKey(bio, path->construction_certificate); /* XXX: NTRU goes here */
-	if (ret == 0) {
-		BIO_free(bio);
-		return -1;
-	}
-	BIO_get_mem_ptr(bio, &bptr);
-	assert(BIO_set_close(bio, BIO_NOCLOSE) == 1);
-	BIO_free(bio);
-	path->construction_certificate_len = bptr->length;
-	path->construction_certificate_data = malloc(bptr->length);
-	if (path->construction_certificate_data == NULL) {
-		BUF_MEM_free(bptr);
-		return -1;
-	}
-	memcpy(path->construction_certificate_data, bptr->data, bptr->length);
-	BUF_MEM_free(bptr);
 	return 0;
 }
 
@@ -443,8 +407,8 @@ generate_setup_packages(const struct config *config, struct setup_path *path, in
 	rand_bytes(sps[0]->prev_id, CRYPTO_DIGEST_LENGTH);
 	rand_bytes(sps[0]->next_id, CRYPTO_DIGEST_LENGTH);
 	rand_bytes(sps[0]->replaceseed, SYMMETRIC_CIPHER_KEY_LEN);
-	sps[0]->prev_communication_certificate_flat = config->communication_certificate_flat;
-	sps[0]->next_communication_certificate_flat = nodes[1]->communication_certificate_flat;
+	sps[0]->prev_communication_key = KeyPair_get_public_key(config->communication_keypair);
+	sps[0]->next_communication_key = nodes[1]->communication_key;
 	sps[0]->flags |= nodes[0]->flags;
 	/* intermediary nodes */
 	for (i = 1; i < nnodes - 1; i++) {
@@ -455,8 +419,8 @@ generate_setup_packages(const struct config *config, struct setup_path *path, in
 		rand_bytes(sps[i]->next_id, CRYPTO_DIGEST_LENGTH);
 		rand_bytes(sps[i]->replaceseed, SYMMETRIC_CIPHER_KEY_LEN);
 		memcpy(sps[i]->prev_id, sps[i - 1]->next_id, CRYPTO_DIGEST_LENGTH);
-		sps[i]->prev_communication_certificate_flat = nodes[i - 1]->communication_certificate_flat;
-		sps[i]->next_communication_certificate_flat = nodes[i + 1]->communication_certificate_flat;
+		sps[i]->prev_communication_key = nodes[i - 1]->communication_key;
+		sps[i]->next_communication_key = nodes[i + 1]->communication_key;
 		sps[i]->flags |= nodes[i]->flags;
 	}
 
@@ -468,8 +432,8 @@ generate_setup_packages(const struct config *config, struct setup_path *path, in
 	memcpy(sps[nnodes - 1]->prev_id, sps[nnodes - 2]->next_id, CRYPTO_DIGEST_LENGTH);
 	memcpy(sps[nnodes - 1]->next_id, sps[0]->prev_id, CRYPTO_DIGEST_LENGTH);
 	rand_bytes(sps[nnodes - 1]->replaceseed, SYMMETRIC_CIPHER_KEY_LEN);
-	sps[nnodes - 1]->prev_communication_certificate_flat = nodes[nnodes - 2]->communication_certificate_flat;
-	sps[nnodes - 1]->next_communication_certificate_flat = config->communication_certificate_flat;
+	sps[nnodes - 1]->prev_communication_key = nodes[nnodes - 2]->communication_key;
+	sps[nnodes - 1]->next_communication_key = KeyPair_get_public_key(config->communication_keypair);
 	if (nround == 2) {
 		for (i = 0; i < nnodes; i++) {
 			sps[i]->nkeys = config->nkeys;
@@ -478,92 +442,6 @@ generate_setup_packages(const struct config *config, struct setup_path *path, in
 			rand_bytes(sps[i]->replaceseed, SYMMETRIC_CIPHER_KEY_LEN);
 		}
 	}
-}
-
-static uint8_t *
-encrypt_setup_package_asymmetric(const uint8_t *serialized, uint32_t len, EVP_PKEY *pubkey, int *outlen)
-{
-	int ret, tmp, privkeylen;
-	uint32_t crypted;
-	uint8_t *out, *p;
-	EVP_CIPHER_CTX ctx;
-	const EVP_CIPHER *type = EVP_aes_256_cbc();
-	out = malloc((len / SYMMETRIC_CIPHER_BLOCK_SIZE) * SYMMETRIC_CIPHER_BLOCK_SIZE + SYMMETRIC_CIPHER_BLOCK_SIZE + EVP_PKEY_size(pubkey) + SYMMETRIC_CIPHER_IV_LEN + 2 * 4);
-	if (out == NULL) {
-		return NULL;
-	}
-	EVP_CIPHER_CTX_init(&ctx);
-	p = out + SYMMETRIC_CIPHER_IV_LEN + 2 * 4;
-	ret = EVP_SealInit(&ctx, type, &p, &privkeylen, out + 2 * 4, &pubkey, 1);
-	assert (privkeylen == EVP_PKEY_size(pubkey));
-	if (ret == 0) {
-		EVP_CIPHER_CTX_cleanup(&ctx);
-		free(out);
-		return NULL;
-	}
-	ret = EVP_SealUpdate(&ctx, out + EVP_PKEY_size(pubkey) + SYMMETRIC_CIPHER_IV_LEN + 2 * 4, &tmp, serialized, len);
-	crypted = tmp;
-	if (ret == 0) {
-		EVP_CIPHER_CTX_cleanup(&ctx);
-		free(out);
-		return NULL;
-	}
-	ret = EVP_SealFinal(&ctx, out + crypted + EVP_PKEY_size(pubkey) + SYMMETRIC_CIPHER_IV_LEN + 2 * 4, &tmp);
-	crypted += tmp;
-	if (ret == 0) {
-		EVP_CIPHER_CTX_cleanup(&ctx);
-		free(out);
-		return NULL;
-	}
-	EVP_CIPHER_CTX_cleanup(&ctx);
-	assert(crypted == (len / SYMMETRIC_CIPHER_BLOCK_SIZE) * SYMMETRIC_CIPHER_BLOCK_SIZE + SYMMETRIC_CIPHER_BLOCK_SIZE);
-	serialize_32_t(crypted, out);
-	serialize_32_t(EVP_PKEY_size(pubkey), out + 4);
-	*outlen = crypted + EVP_PKEY_size(pubkey) + SYMMETRIC_CIPHER_IV_LEN + 2 * 4;
-	return out;
-}
-
-static uint8_t *
-encrypt_symmetric(const uint8_t *serialized, uint32_t len, const uint8_t *key, int *outlen)
-{
-	int ret, tmp;
-	uint32_t crypted;
-	uint8_t *out;
-	EVP_CIPHER_CTX ctx;
-	uint8_t sizedkey[SYMMETRIC_CIPHER_KEY_LEN];
-	const EVP_CIPHER *type = EVP_aes_256_cbc();
-	out = calloc((len / SYMMETRIC_CIPHER_BLOCK_SIZE) * SYMMETRIC_CIPHER_BLOCK_SIZE + SYMMETRIC_CIPHER_BLOCK_SIZE + SYMMETRIC_CIPHER_IV_LEN, 1);
-	if (out == NULL) {
-		return NULL;
-	}
-	pad_key(key, CRYPTO_DIGEST_LENGTH, sizedkey, SYMMETRIC_CIPHER_KEY_LEN);
-	rand_bytes(out, EVP_CIPHER_iv_length(type));
-	EVP_CIPHER_CTX_init(&ctx);
-	ret = EVP_EncryptInit(&ctx, type, sizedkey, out);
-	if (ret == 0) {
-		EVP_CIPHER_CTX_cleanup(&ctx);
-		free(out);
-		return NULL;
-	}
-	ret = EVP_EncryptUpdate(&ctx, out + SYMMETRIC_CIPHER_IV_LEN, &tmp, serialized, len);
-	crypted = tmp;
-	if (ret == 0) {
-		EVP_CIPHER_CTX_cleanup(&ctx);
-		free(out);
-		return NULL;
-	}
-	ret = EVP_EncryptFinal(&ctx, out + crypted + SYMMETRIC_CIPHER_IV_LEN, &tmp);
-	crypted += tmp;
-	if (ret == 0) {
-		EVP_CIPHER_CTX_cleanup(&ctx);
-		free(out);
-		return NULL;
-	}
-
-	EVP_CIPHER_CTX_cleanup(&ctx);
-	assert(crypted == (len / SYMMETRIC_CIPHER_BLOCK_SIZE) * SYMMETRIC_CIPHER_BLOCK_SIZE + SYMMETRIC_CIPHER_BLOCK_SIZE);
-	*outlen = crypted + SYMMETRIC_CIPHER_IV_LEN;
-	return out;
 }
 
 static DummySetupPackage *
@@ -612,9 +490,9 @@ sps_to_SetupPackage(struct setup_path *path, int package_index, int nround)
 	/*required uint32 next_port = 4;*/
 	/*required bytes prev_id = 5;*/
 	/*required bytes next_id = 6;*/
-	/*required bytes prev_communication_certificate_flat = 7;*/
-	/*required bytes next_communication_certificate_flat = 8;*/
-	/*required bytes construction_certificate_flat = 9;*/
+	/*required bytes prev_communication_key_data = 7;*/
+	/*required bytes next_communication_key_data = 8;*/
+	/*required bytes construction_key_data = 9;*/
 	/*repeated dummy_setup_package dummies = 10;*/
 	/*required uint32 nkeys = 11;*/
 	/*required bytes key_seed = 12;*/
@@ -641,12 +519,16 @@ sps_to_SetupPackage(struct setup_path *path, int package_index, int nround)
 		bzero(ssp->next_id, CRYPTO_DIGEST_LENGTH); /* set next_id to all zero */
 	}
 	sp->next_id.data = ssp->next_id;
-	sp->next_communication_certificate_flat.len = ssp->next_communication_certificate_flat->len;
-	sp->next_communication_certificate_flat.data = ssp->next_communication_certificate_flat->data;
-	sp->prev_communication_certificate_flat.len = ssp->prev_communication_certificate_flat->len;
-	sp->prev_communication_certificate_flat.data = ssp->prev_communication_certificate_flat->data;
-	sp->construction_certificate_flat.len = path->construction_certificate_len;
-	sp->construction_certificate_flat.data = path->construction_certificate_data;
+  
+  sp->prev_communication_key_data.len = PUBLIC_KEY_get_len(ssp->prev_communication_key);
+  sp->prev_communication_key_data.data = PUBLIC_KEY_data(ssp->prev_communication_key);
+
+	sp->next_communication_key_data.len = PUBLIC_KEY_get_len(ssp->next_communication_key);
+	sp->next_communication_key_data.data = PUBLIC_KEY_data(ssp->next_communication_key);
+  
+	sp->construction_key_data.len = KeyPair_get_public_key_length(path->construction_keypair);
+	sp->construction_key_data.data = KeyPair_get_public_key_data(path->construction_keypair);
+  
 	sp->n_dummies = ssp->ndummies;
 	for (i = 0; i < sp->n_dummies; i++) {
 		sp->dummies[i] = create_dummy(&ssp->dummies[i]);
@@ -716,14 +598,14 @@ setup_package_free(SetupPackage *s)
 }
 
 static int
-calculate_expected_size(uint32_t size, EVP_PKEY *pubkey)
+calculate_expected_size(uint32_t size, struct PUBLIC_KEY *pubkey)
 {
 	return (((size / SYMMETRIC_CIPHER_BLOCK_SIZE) *
-		 SYMMETRIC_CIPHER_BLOCK_SIZE + EVP_PKEY_size(pubkey) +
+		 SYMMETRIC_CIPHER_BLOCK_SIZE + PUBLIC_KEY_get_len(pubkey) +
 		 SYMMETRIC_CIPHER_BLOCK_SIZE + SYMMETRIC_CIPHER_IV_LEN + 2 * 4) /
 		SYMMETRIC_CIPHER_BLOCK_SIZE) * SYMMETRIC_CIPHER_BLOCK_SIZE +
 		SYMMETRIC_CIPHER_BLOCK_SIZE + SYMMETRIC_CIPHER_IV_LEN +
-		RSA_SIGN_LEN;
+		STD_SIGN_LEN;
 }
 
 struct tracking_info {
@@ -965,17 +847,18 @@ create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *
 	uint8_t *replaced_hashes, *original_hashes, **packed, *out;
 	int ret, i;
 	cleanup_stack_init;
-	privkey = SECRET_KEY_new();
+  privkey = KeyPair_get_secret_key(path->construction_keypair);
 	if (privkey == NULL) {
 		cleanup_stack_free_all();
 		return NULL;
 	}
+  privkey = SECRET_KEY_clone(privkey);
+  if (privkey == NULL) {
+    cleanup_stack_free_all();
+    return NULL;
+  }
 	cleanup_stack_push(SECRET_KEY_free, privkey);
-	ret = SECRET_KEY_set_CURVE25519(privkey, path->construction_certificate); 
-	if (ret != 1) {
-		cleanup_stack_free_all();
-		return NULL;
-	}
+  
 	packed = malloc(path->nnodes * sizeof(uint8_t *));
 	if (packed == NULL) {
 		cleanup_stack_free_all();
@@ -998,18 +881,18 @@ create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *
 	 * with receiving nodes public key
 	 * loop is reverse */
 	for (i = path->nnodes - 1; i >= 0; i--) {
-		EVP_PKEY *pubkey;
-		int outlen;
-		uint8_t sig[RSA_SIGN_LEN], *oldcontents;
-		pubkey = X509_get_pubkey(path->nodes[i].construction_certificate);
+		struct PUBLIC_KEY *pubkey;
+		uint32_t outlen;
+		uint8_t sig[STD_SIGN_LEN], *oldcontents;
+		pubkey = PUBLIC_KEY_clone(path->nodes[i].construction_key);
 		if (pubkey == NULL) {
 			cleanup_stack_free_all();
 			return NULL;
 		}
+    cleanup_stack_push(PUBLIC_KEY_free, pubkey);
 		add_external_hash(sps[i], replaced_hashes, original_hashes, i, tracking_info, path->nnodes);
 		packed[i] = calloc(1, sizes[i]);
 		if (packed[i] == NULL) {
-			EVP_PKEY_free(pubkey);
 			cleanup_stack_free_all();
 			return NULL;
 		}
@@ -1018,29 +901,27 @@ create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *
 		ret = setup_package__pack(sps[i], packed[i]);
 		if (ret == 0) {
 			cleanup_stack_free_all();
-			EVP_PKEY_free(pubkey);
 			return NULL;
 		}
 		cryptohash(packed[i], sizes[i], sps[i]->hash.data);
 		ret = setup_package__pack(sps[i], packed[i]);
 		if (ret == 0) {
-			EVP_PKEY_free(pubkey);
 			cleanup_stack_free_all();
 			return NULL;
 		}
 		/* encrypt asymmetrically (iv and symm key are prepended) */
-		path->contents[i] = encrypt_setup_package_asymmetric(packed[i], sizes[i], pubkey, &outlen);
+    path->contents[i] = encrypt_asymmetric_pack(pubkey, packed[i], sizes[i], &outlen);
 		sizes[i] = outlen;
-		EVP_PKEY_free(pubkey);
+		PUBLIC_KEY_free(pubkey);
 		if (path->contents[i] == NULL) {
 			cleanup_stack_free_all();
 			return NULL;
 		}
 		cleanup_stack_push(free, path->contents[i]);
 		if (nround == 1) {
-			path->contents[i] = encrypt_symmetric(path->contents[i], sizes[i], path->sps[i].prev_id, &outlen);
+			path->contents[i] = encrypt_symmetric_pack(path->contents[i], sizes[i], path->sps[i].prev_id, &outlen);
 		} else {
-			path->contents[i] = encrypt_symmetric(path->contents[i], sizes[i], path->sps[i].old_prev_id, &outlen);
+			path->contents[i] = encrypt_symmetric_pack(path->contents[i], sizes[i], path->sps[i].old_prev_id, &outlen);
 		}
 		if (path->contents[i] == NULL) {
 			cleanup_stack_free_all();
@@ -1052,7 +933,7 @@ create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *
 			cleanup_stack_free_all();
 			return NULL;
 		}
-		sizes[i] += RSA_SIGN_LEN; 
+		sizes[i] += STD_SIGN_LEN; 
 		assert(expected_sizes[i] == sizes[i]);
 		oldcontents = path->contents[i];
 		path->contents[i] = malloc(sizes[i]);
@@ -1061,8 +942,8 @@ create_setup_array(struct setup_path *path, SetupPackage **sps, const uint32_t *
 			return NULL;
 		}
 		/* prepend signature */
-		memcpy(path->contents[i], sig, RSA_SIGN_LEN);
-		memcpy(path->contents[i] + RSA_SIGN_LEN, oldcontents, sizes[i] - RSA_SIGN_LEN);
+		memcpy(path->contents[i], sig, STD_SIGN_LEN);
+		memcpy(path->contents[i] + STD_SIGN_LEN, oldcontents, sizes[i] - STD_SIGN_LEN);
 		free(oldcontents);
 		cryptohash(path->contents[i], sizes[i], original_hashes + i * CRYPTO_DIGEST_LENGTH);
 	}
@@ -1088,7 +969,7 @@ pack_setup_packages(struct setup_path *path, uint32_t *outsize, int nround)
 	uint32_t *sizes, *expected_sizes;
 	uint8_t *out;
 	struct tracking_info *tracking;
-	EVP_PKEY *pubkey;
+	struct PUBLIC_KEY *pubkey;
 	cleanup_stack_init;
 	assert(nround == 1 || nround == 2);
 	sps = malloc(path->nnodes * sizeof (SetupPackage *));
@@ -1109,21 +990,20 @@ pack_setup_packages(struct setup_path *path, uint32_t *outsize, int nround)
 	}
 	cleanup_stack_push(free, expected_sizes);
 	for (i = 0; i < path->nnodes; i++) {
-		pubkey = X509_get_pubkey(path->nodes[i].construction_certificate);
+		pubkey = path->nodes[i].construction_key;
+    assert(pubkey);
 		if (pubkey == NULL) {
 			cleanup_stack_free_all();
 			return NULL;
 		}
 		sps[i] = sps_to_SetupPackage(path, i, nround);
 		if (sps[i] == NULL) {
-			EVP_PKEY_free(pubkey);
 			cleanup_stack_free_all();
 			return NULL;
 		}
 		cleanup_stack_push(setup_package_free, sps[i]);
 		sizes[i] = setup_package__get_packed_size(sps[i]);
 		expected_sizes[i] = calculate_expected_size(sizes[i], pubkey);
-		EVP_PKEY_free(pubkey);
 	}
 	for (i = 0; i < path->nnodes; i++) {
 		uint32_t j;
@@ -1225,13 +1105,13 @@ validate_sp(const SetupPackage *sp)
 	if (sp->next_port>>16) {
 		return -1;
 	}
-	if (sp->prev_communication_certificate_flat.len < 4) {
+	if (sp->prev_communication_key_data.len < 4) {
 		return -1;
 	}
-	if (sp->next_communication_certificate_flat.len < 4) {
+	if (sp->next_communication_key_data.len < 4) {
 		return -1;
 	}
-	if (sp->construction_certificate_flat.len < 4) {
+	if (sp->construction_key_data.len < 4) {
 		return -1;
 	}
 	for (i = 0; i < sp->n_dummies; i++) {
@@ -1290,10 +1170,7 @@ static int
 extract_slot_information(const SetupPackage *sp, struct conn_ctx *conn, int nround)
 {
 	/* all allocs will be freed by conn_ctx_free in case of failure */
-	struct X509_flat x;
-	BIO *mem;
-	BUF_MEM bptr;
-	assert(nround == 1 || nround == 2);
+  assert(nround == 1 || nround == 2);
 	memcpy(conn->prev_id, sp->prev_id.data, CRYPTO_DIGEST_LENGTH);
 	memcpy(conn->next_id, sp->next_id.data, CRYPTO_DIGEST_LENGTH);
 	conn->prev_ip = strdup(sp->prev_ip);
@@ -1307,22 +1184,19 @@ extract_slot_information(const SetupPackage *sp, struct conn_ctx *conn, int nrou
 	conn->prev_port = sp->prev_port;
 	conn->next_port = sp->next_port;
 	conn->flags = sp->flags;
-	x.len = sp->prev_communication_certificate_flat.len;
-	x.data = sp->prev_communication_certificate_flat.data;
-	conn->prev_communication_certificate = read_x509_from_x509_flat(&x);
-	x.len = sp->next_communication_certificate_flat.len;
-	x.data = sp->next_communication_certificate_flat.data;
-	conn->next_communication_certificate = read_x509_from_x509_flat(&x);
-	mem = BIO_new(BIO_s_mem());
-	if (mem == NULL) {
-		return -1;
-	}
-	bptr.data = (char *) sp->construction_certificate_flat.data;
-	bptr.length = sp->construction_certificate_flat.len;
-	BIO_set_mem_buf(mem, &bptr, BIO_NOCLOSE);
-	conn->construction_certificate = PEM_read_bio_RSAPublicKey(mem, NULL, NULL, NULL);
-	BIO_free(mem);
-	if (conn->construction_certificate == NULL) {
+  
+	conn->prev_communication_key = PUBLIC_KEY_copy(sp->prev_communication_key_data.data, sp->prev_communication_key_data.len);
+  if ( conn->prev_communication_key == NULL) {
+    return -1;
+  }
+  
+	conn->next_communication_key = PUBLIC_KEY_copy(sp->next_communication_key_data.data, sp->next_communication_key_data.len);
+  if ( conn->next_communication_key == NULL) {
+    return -1;
+  }
+  
+	conn->construction_key = PUBLIC_KEY_copy(sp->construction_key_data.data, sp->construction_key_data.len);
+	if (conn->construction_key == NULL) {
 		return -1;
 	}
 	if (nround == 2 && sp->flags & X_NODE) {
@@ -1351,7 +1225,7 @@ validate_setup_array(const SetupArray *a)
 		return -1;
 	}
 	for (i = 0; i < a->n_slots; i++) {
-		if (a->slots[i].len < RSA_SIGN_LEN + SYMMETRIC_CIPHER_IV_LEN + 8) {
+		if (a->slots[i].len < STD_SIGN_LEN + SYMMETRIC_CIPHER_IV_LEN + 8) {
 			return -1;
 		}
 	}
@@ -1475,11 +1349,11 @@ static SetupArray *
 extract_setup_array(const uint8_t *sa, int sa_len, const uint8_t *id, const struct config *config, int *own_slot, SetupPackage **own_sp)
 {
 	SetupArray *a;
-	int outlen, written1, written2, ret, own_idx;
+  uint32_t outlen, written1, written2;
+	int ret, own_idx;
 	uint32_t i, package_size, pubkey_size;
 	uint8_t *out, hash[CRYPTO_DIGEST_LENGTH], *oldout, received_hash[CRYPTO_DIGEST_LENGTH], sizedkey[SYMMETRIC_CIPHER_KEY_LEN];
 	SetupPackage *sp;
-	EVP_CIPHER_CTX ctx;
 	cleanup_stack_init;
 	pad_key(id, CRYPTO_DIGEST_LENGTH, sizedkey, SYMMETRIC_CIPHER_KEY_LEN);
 	a = setup_array__unpack(NULL, sa_len, sa);
@@ -1495,7 +1369,7 @@ extract_setup_array(const uint8_t *sa, int sa_len, const uint8_t *id, const stru
 	sp = NULL;
 	own_idx = -1;
 	for (i = 0; i < a->n_slots; i++) {
-		package_size = a->slots[i].len - RSA_SIGN_LEN - SYMMETRIC_CIPHER_IV_LEN;
+		package_size = a->slots[i].len - STD_SIGN_LEN - SYMMETRIC_CIPHER_IV_LEN;
 		if (package_size % SYMMETRIC_CIPHER_BLOCK_SIZE || package_size - (int32_t) package_size) {
 			cleanup_stack_free_all();
 			return NULL;
@@ -1506,23 +1380,10 @@ extract_setup_array(const uint8_t *sa, int sa_len, const uint8_t *id, const stru
 			return NULL;
 		}
 		cleanup_stack_push(free, out);
-		EVP_CIPHER_CTX_init(&ctx);
-		ret = EVP_DecryptInit(&ctx, EVP_aes_256_cbc(), sizedkey, a->slots[i].data + RSA_SIGN_LEN);
+    /* try decrpypting package */
+    ret = decrypt_symmetric_unpack(out, &written1, a->slots[i].data + STD_SIGN_LEN, package_size, sizedkey);
 		if (ret != 1) {
-			EVP_CIPHER_CTX_cleanup(&ctx);
-			cleanup_stack_free_all();
-			return NULL;
-		}
-		ret = EVP_DecryptUpdate(&ctx, out, &written1, a->slots[i].data + RSA_SIGN_LEN + SYMMETRIC_CIPHER_IV_LEN, package_size);
-		if (ret != 1) {
-			EVP_CIPHER_CTX_cleanup(&ctx);
-			cleanup_stack_free_all();
-			return NULL;
-		}
-		ret = EVP_DecryptFinal(&ctx, out + written1, &written2);
-		EVP_CIPHER_CTX_cleanup(&ctx);
-		if (ret != 1) {
-			/* wrong package - padding mismatch */
+			/* wrong package, not for us - padding mismatch */
 			cleanup_stack_pop(); /* out */
 			continue;
 		}
@@ -1532,12 +1393,9 @@ extract_setup_array(const uint8_t *sa, int sa_len, const uint8_t *id, const stru
 			cleanup_stack_free_all();
 			return NULL;
 		}
-		EVP_CIPHER_CTX_init(&ctx); /* reinit cipher for asymmetric decryption */
-		if (ret != 1) {
-			cleanup_stack_free_all();
-			return NULL;
-		}
 		pubkey_size = deserialize_32_t(out + 4);
+
+    
 		ret = EVP_OpenInit(&ctx, EVP_aes_256_cbc(), out + 2 * 4 + SYMMETRIC_CIPHER_IV_LEN, pubkey_size, out + 2 * 4, config->private_construction_key);
 		if (ret != 1) {
 			/* wrong package - key not revoverable */
@@ -1657,7 +1515,7 @@ handle_second_round_setup_array(const struct config *config, const uint8_t *sa, 
 	SetupPackage *sp;
 	int own_idx, ret;
 	uint8_t *new;
-	EVP_PKEY *key;
+  struct PUBLIC_KEY *key;
 	cleanup_stack_init;
 	if (memcmp(oldconn->prev_id, id, CRYPTO_DIGEST_LENGTH)) {
 		return NULL;
@@ -1673,18 +1531,13 @@ handle_second_round_setup_array(const struct config *config, const uint8_t *sa, 
 		cleanup_stack_free_all();
 		return NULL;
 	}
-	key = EVP_PKEY_new();
+	key = oldconn->construction_key;
+  assert(key);
 	if (key == NULL) {
 		cleanup_stack_free_all();
 		return NULL;
 	}
-	cleanup_stack_push(EVP_PKEY_free, key);
-	ret = EVP_PKEY_set1_RSA(key, oldconn->construction_certificate);
-	if (ret == 0) {
-		cleanup_stack_free_all();
-		return NULL;
-	}
-	ret = check_signed_data(a->slots[own_idx].data, RSA_SIGN_LEN, a->slots[own_idx].data + RSA_SIGN_LEN, a->slots[own_idx].len - RSA_SIGN_LEN, key);
+	ret = verify_signed_data(a->slots[own_idx].data, STD_SIGN_LEN, a->slots[own_idx].data + STD_SIGN_LEN, a->slots[own_idx].len - STD_SIGN_LEN, key);
 	if (ret != 0) {
 		cleanup_stack_free_all();
 		return NULL;
@@ -1714,16 +1567,13 @@ send_x_package(struct setup_path *path, const struct config *config)
 			break;
 		}
 	}
-	free_ssl_connection(path->ssl_conn);
-	path->ssl_conn = create_ssl_connection(path->nodes[x_idx].ip, path->nodes[x_idx].port, config->communication_certificate, config->private_communication_key);
-	if (path->ssl_conn == NULL) {
-		return -1;
-	}
-	if (! X509_compare(path->ssl_conn->peer_cert, path->nodes[x_idx].communication_certificate)) {
+	free_node_connection(path->node_conn);
+  path->node_conn = node_connection_connect(path->nodes[x_idx]);
+	if (path->node_conn == NULL) {
 		return -1;
 	}
 	serialize_32_t(CRYPTO_DIGEST_LENGTH, preface);
-	ret = ssl_write(path->ssl_conn->ssl, preface, 4);
+  ret = node_connection_write(path->node_conn, preface, 4);
 	if (ret != 0) {
 		return -1;
 	}
@@ -1784,7 +1634,7 @@ check_package(const uint8_t *endhash, const uint8_t *endid, const uint8_t *packa
 	}
 	bzero(result, CRYPTO_DIGEST_LENGTH);
 	for (i = 0; i < a->n_slots; i++) {
-		SHA(a->slots[i].data, a->slots[i].len, hash);
+		cryptohash(a->slots[i].data, a->slots[i].len, hash);
 		xor(result, hash, CRYPTO_DIGEST_LENGTH);
 	}
 	if (!memcmp(result, endhash, CRYPTO_DIGEST_LENGTH)) {
@@ -1836,7 +1686,7 @@ construct_path(const struct config *config, int want_entrypath, int reserve_ap)
 	uint8_t *package, *array;
 	struct setup_path *path;
 	struct path *p;
-	struct ssl_connection *path_conn;
+	struct node_connection *path_conn;
 	struct awaited_connection *wait;
 
 	if (config->nynodes < 3 * config->nxnodes - 2 || config->nxnodes +

@@ -1,3 +1,8 @@
+message package_upgrade_info {
+  required uint32 version = 1;
+  optional bytes upgrade = 2;
+}
+
 message dummy_setup_package {
 	required bytes seed = 1;
 	required fixed32 size = 2;
@@ -8,6 +13,7 @@ message routing_table_entry {
 	required bytes ap_adress = 1;
 	repeated string ip_adresses = 2;
 	repeated fixed32 ports = 3;
+  optional bytes upgrade = 4;
 };
 
 message setup_package {
@@ -17,9 +23,9 @@ message setup_package {
 	required uint32 next_port = 4;
 	required bytes prev_id = 5;
 	required bytes next_id = 6;
-	required bytes prev_communication_certificate_flat = 7;
-	required bytes next_communication_certificate_flat = 8;
-	required bytes construction_certificate_flat = 9;
+	required bytes prev_communication_key_data = 7;
+	required bytes next_communication_key_data = 8;
+	required bytes construction_key_data = 9;
 	repeated dummy_setup_package dummies = 10;
 	required uint32 nkeys = 11;
 	required bytes key_seed = 12;
@@ -30,6 +36,7 @@ message setup_package {
 	required bytes external_hash = 17;
 	optional bytes ap_adress = 18;
 	optional routing_table_entry rte = 19;
+  optional package_upgrade_info upgrade = 20;
 }
 
 message setup_array {

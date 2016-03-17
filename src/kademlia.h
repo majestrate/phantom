@@ -7,10 +7,10 @@
 #include "list.h"
 #include "diskcache.h"
 #include "cleanup_stack.h"
-#include "x509_flat.h"
 #include "kademlia.pb-c.h"
 #include "addr.h"
 #include "hash.h"
+#include "key.h"
 
 #define NBUCKETS (CRYPTO_DIGEST_LENGTH * 8)
 #define CHECKQUITTIMEOUT 5
@@ -36,8 +36,8 @@ struct kad_node_info {
 	struct kad_node_info *prev;
 	struct kad_node_info *next;
 	uint8_t id[CRYPTO_DIGEST_LENGTH];
-	X509 *cert;
-	X509 *pbc;
+	struct PUBLIC_KEY *commkey;
+	struct PUBLIC_KEY *pathkey;
 	uint16_t port;
 	struct timespec last_seen;
 	char *ip;
@@ -95,7 +95,7 @@ int local_find(const uint8_t *key, uint8_t **data, size_t *len);
 int local_store(const uint8_t *key, const uint8_t *data, uint32_t len);
 struct kad_node_list *get_k_closest_nodes(const uint8_t *id, const uint8_t *requestor);
 void free_kad_node_list(struct kad_node_list *l);
-struct kad_node_info *new_kad_node_info(const uint8_t *id, const char *ip, uint16_t port, X509 *cert, X509 *pbc);
+struct kad_node_info *new_kad_node_info(const uint8_t *id, const char *ip, uint16_t port, struct PUBLIC_KEY *commkey, struct PUBLIC_KEY *pathkey);
 void free_kad_node_info(struct kad_node_info *n);
 void update_table_relay(const struct kad_node_info *n);
 

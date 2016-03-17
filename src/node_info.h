@@ -1,17 +1,12 @@
 #ifndef __HAVE_NODE_INFO_H__
 #define __HAVE_NODE_INFO_H__
 
-#include <openssl/x509.h>
-#include <openssl/rsa.h>
-#include <openssl/evp.h>
 #include <stdint.h>
-#include "x509_flat.h"
+#include "key.h"
 
 struct node_info {
-	X509 *construction_certificate; /* path building certificate */
-	struct X509_flat *construction_certificate_flat;
-	X509 *communication_certificate; /* communication certificate */
-	struct X509_flat *communication_certificate_flat;
+	struct PUBLIC_KEY * construction_key; /* path building key */
+	struct PUBLIC_KEY * communication_key; /* communication key */
 	char *ip;
 	uint16_t port;
 	uint32_t flags;

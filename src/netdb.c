@@ -134,7 +134,7 @@ update_routing_table_entry(const struct in6_addr *ap_adress, struct rte *signed_
 {
 	int ret;
 	RoutingTableEntry *re;
-	uint8_t key[SHA_DIGEST_LENGTH];
+	uint8_t key[CRYPTO_DIGEST_LENGTH];
 	/* FIXME routing cert */
 	(void) routing_certificate;
 	re = routing_table_entry__unpack(NULL, signed_routing_entry->len, signed_routing_entry->data);
@@ -176,15 +176,15 @@ update_routing_table_entry(const struct in6_addr *ap_adress, struct rte *signed_
 }
 
 int
-get_random_node_ip_adresses(char **adresses, uint16_t *ports, X509 **communication_certificates, X509 **path_building_certificates, int num)
+get_random_node_ip_adresses(char **adresses, uint16_t *ports, struct PUBLIC_KEY **communication_keys, struct PUBLIC_KEY **path_building_keys, int num)
 {
 	int i;
 	struct kad_node_list *list;
 	struct kad_node_info *n;
 	assert(adresses);
 	assert(ports);
-	assert(communication_certificates);
-	assert(path_building_certificates);
+	assert(communication_keys);
+	assert(path_building_keys);
 	while (1) {
 		list = get_n_nodes(num);
 		if (list == NULL || list->nentries < num) {
@@ -203,10 +203,10 @@ get_random_node_ip_adresses(char **adresses, uint16_t *ports, X509 **communicati
 	for (i = 0; i < num; i++) {
 		adresses[i] = n->ip;
 		n->ip = NULL;
-		communication_certificates[i] = n->cert;
-		n->cert = NULL;
-		path_building_certificates[i] = n->pbc;
-		n->pbc = NULL;
+		communication_keys[i] = n->commkey;
+		n->commkey = NULL;
+		path_building_keys[i] = n->pathkey;
+		n->pathkey = NULL;
 		ports[i] = n->port;
 		n = n->next;
 	}

@@ -1,9 +1,15 @@
+message node_info_upgrade {
+  required uint32 version = 1;
+  // more members go here
+}
+
 message node_info {
 	required bytes id = 1;
 	required uint32 port = 2;
 	required bytes cert = 3;
 	required bytes pbc = 4;
 	required string ip = 5;
+  optional node_info_upgrade upgrade = 6;
 };
 
 message store {

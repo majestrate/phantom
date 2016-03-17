@@ -1,0 +1,4 @@
+message upgrade_info {
+  required uint32 version = 1;
+  optional bytes upgrade = 2;
+}
