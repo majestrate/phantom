@@ -60,13 +60,13 @@ int
 get_entry_nodes_for_ap_adress(char ***ip_adresses, uint16_t **ports, int *num, const struct in6_addr *ap_adress)
 {
 	RoutingTableEntry *re;
-	uint8_t hash[SHA_DIGEST_LENGTH], *re_data;
+	uint8_t hash[CRYPTO_DIGEST_LENGTH], *re_data;
 	uint32_t i;
 	size_t re_len;
 	char **iip_adresses;
 	uint16_t *iports;
 	int ret;
-	SHA1(ap_adress->s6_addr, sizeof (ap_adress->s6_addr), hash);
+	cryptohash(ap_adress->s6_addr, sizeof (ap_adress->s6_addr), hash);
 	ret = kad_find(hash, &re_data, &re_len);
 	if (ret != 0) {
 		return -1;
@@ -134,7 +134,7 @@ update_routing_table_entry(const struct in6_addr *ap_adress, struct rte *signed_
 {
 	int ret;
 	RoutingTableEntry *re;
-	uint8_t key[SHA_DIGEST_LENGTH];
+	uint8_t key[CRYPTO_DIGEST_LENGTH];
 	/* FIXME routing cert */
 	(void) routing_certificate;
 	re = routing_table_entry__unpack(NULL, signed_routing_entry->len, signed_routing_entry->data);
@@ -167,7 +167,7 @@ update_routing_table_entry(const struct in6_addr *ap_adress, struct rte *signed_
 	ret = routing_table_entry__pack(re, signed_routing_entry->data);
 	routing_table_entry__free_unpacked(re, NULL);
 	assert((uint32_t) ret == signed_routing_entry->len);
-	SHA1(ap_adress->s6_addr, sizeof(ap_adress->s6_addr), key);
+	cryptohash(ap_adress->s6_addr, sizeof(ap_adress->s6_addr), key);
 	ret = kad_store(key, signed_routing_entry->data, signed_routing_entry->len);
 	if (ret == -1) {
 		return -1;

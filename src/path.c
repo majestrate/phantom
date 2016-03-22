@@ -70,12 +70,10 @@ generate_conn_keys(int nkeys, const uint8_t *basekey, const uint8_t *salt)
 	cleanup_stack_push(free, keys->keys);
 	memcpy(tmp, basekey, SYMMETRIC_CIPHER_KEY_LEN);
 	for (i = 0; i < nkeys; i++) {
-		/* PKCS5_PBKDF2_HMAC_SHA1((char *) tmp, SYMMETRIC_CIPHER_KEY_LEN, salt, SYMMETRIC_CIPHER_KEY_LEN, PBKDF2_STEPS, SYMMETRIC_CIPHER_KEY_LEN, keys->keys + SYMMETRIC_CIPHER_KEY_LEN * i); */
     kdf((char*) tmp, SYMMETRIC_CIPHER_KEY_LEN, salt, SYMMETRIC_CIPHER_KEY_LEN, KDF_STEPS, SYMMETRIC_CIPHER_KEY_LEN, keys->keys + SYMMETRIC_CIPHER_KEY_LEN * i);
 		memcpy(tmp, keys->keys + SYMMETRIC_CIPHER_KEY_LEN * i, SYMMETRIC_CIPHER_KEY_LEN);
 	}
 	for (i = 0; i < nkeys; i++) {
-		/* PKCS5_PBKDF2_HMAC_SHA1((char *) tmp, SYMMETRIC_CIPHER_IV_LEN, salt, SYMMETRIC_CIPHER_IV_LEN, PBKDF2_STEPS, SYMMETRIC_CIPHER_IV_LEN, keys->ivs + SYMMETRIC_CIPHER_IV_LEN * i); */
     kdf((char*) tmp, SYMMETRIC_CIPHER_IV_LEN, salt, SYMMETRIC_CIPHER_IV_LEN, KDF_STEPS, SYMMETRIC_CIPHER_IV_LEN, keys->keys + SYMMETRIC_CIPHER_IV_LEN * i);
 		memcpy(tmp, keys->ivs + SYMMETRIC_CIPHER_IV_LEN * i, SYMMETRIC_CIPHER_IV_LEN);
 	}
@@ -571,7 +569,7 @@ sign_data(uint8_t *sig, const uint8_t *data, uint32_t len, EVP_PKEY *key)
 	int ret;
 	uint32_t written;
 	EVP_MD_CTX ctx;
-	const EVP_MD *type = EVP_sha1();
+	const EVP_MD *type = EVP_cryptohash();
 	EVP_MD_CTX_init(&ctx);
 	EVP_SignInit(&ctx, type);
 	ret = EVP_SignUpdate(&ctx, data, len);
@@ -592,7 +590,7 @@ check_signed_data(const uint8_t *sig, uint32_t siglen, const uint8_t *data, uint
 {
 	int ret;
 	EVP_MD_CTX ctx;
-	const EVP_MD *type = EVP_sha1();
+	const EVP_MD *type = EVP_cryptohash();
 	EVP_MD_CTX_init(&ctx);
 	EVP_VerifyInit(&ctx, type);
 	ret = EVP_VerifyUpdate(&ctx, data, len);
@@ -1810,7 +1808,7 @@ check_package(const uint8_t *endhash, const uint8_t *endid, const uint8_t *packa
 	uint32_t i;
 	int ret;
 	cleanup_stack_init;
-	if (memcmp(endid, package, SHA_DIGEST_LENGTH)) {
+	if (memcmp(endid, package, CRYPTO_DIGEST_LENGTH)) {
 		return -1;
 	}
 	a = setup_array__unpack(NULL, len - CRYPTO_DIGEST_LENGTH, package + CRYPTO_DIGEST_LENGTH);
@@ -1825,7 +1823,7 @@ check_package(const uint8_t *endhash, const uint8_t *endid, const uint8_t *packa
 	}
 	bzero(result, CRYPTO_DIGEST_LENGTH);
 	for (i = 0; i < a->n_slots; i++) {
-		SHA(a->slots[i].data, a->slots[i].len, hash);
+		cryptohash(a->slots[i].data, a->slots[i].len, hash);
 		xor(result, hash, CRYPTO_DIGEST_LENGTH);
 	}
 	if (!memcmp(result, endhash, CRYPTO_DIGEST_LENGTH)) {
